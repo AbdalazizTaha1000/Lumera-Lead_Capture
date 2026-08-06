@@ -6,6 +6,7 @@
 
 :root {
     --brand-primary: #0F2E4C;
+    --brand-secondary: #C9A227;
     --brand-accent: #C9A227;
     --brand-background: #F7F8FA;
 
@@ -93,15 +94,22 @@ button { font: inherit; }
 }
 
 /* --------------------------------------------------------------- layout */
+/* Mobile-first: the base rules target a phone, wider screens only add room. */
 .funnel {
     position: relative;
     z-index: 1;
+    width: 100%;
     max-width: 680px;
     margin: 0 auto;
-    padding: var(--space-5) var(--space-4) var(--space-6);
+    padding: var(--space-4) var(--space-4) var(--space-6);
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
+}
+
+@media (min-width: 600px) {
+    .funnel { padding: var(--space-6) var(--space-5) var(--space-7); }
 }
 
 .funnel__header {
@@ -110,15 +118,39 @@ button { font: inherit; }
     justify-content: space-between;
     gap: var(--space-4);
     margin-bottom: var(--space-5);
+    min-height: 44px;
 }
 
-.funnel__logo { max-height: 42px; width: auto; }
+.funnel__brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+.funnel__logo {
+    max-height: 40px;
+    max-width: 190px;
+    width: auto;
+    object-fit: contain;
+}
+
+@media (min-width: 600px) {
+    .funnel__logo { max-height: 48px; max-width: 240px; }
+}
 
 .funnel__wordmark {
-    font-weight: 600;
-    font-size: 17px;
-    letter-spacing: .3px;
+    font-weight: 650;
+    font-size: 16px;
+    letter-spacing: -.1px;
     color: var(--brand-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@media (min-width: 600px) {
+    .funnel__wordmark { font-size: 18px; }
 }
 
 /* ------------------------------------------------------ language switch */
@@ -149,11 +181,17 @@ button { font: inherit; }
 }
 
 /* -------------------------------------------------------------- progress */
-.funnel__progress { margin-bottom: var(--space-5); }
+.funnel__progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+}
 
 .progress-bar {
-    height: 5px;
-    background: rgba(15, 46, 76, .1);
+    position: relative;
+    height: 6px;
+    background: color-mix(in srgb, var(--brand-primary) 12%, transparent);
     border-radius: 999px;
     overflow: hidden;
 }
@@ -161,30 +199,42 @@ button { font: inherit; }
 .progress-bar__fill {
     height: 100%;
     width: 0;
-    background: linear-gradient(90deg, var(--brand-primary), var(--brand-accent));
+    background: linear-gradient(90deg, var(--brand-primary), var(--brand-secondary));
     border-radius: 999px;
-    transition: width 320ms cubic-bezier(.2, .7, .3, 1);
+    transition: width 420ms cubic-bezier(.22, .61, .36, 1);
 }
 
 .funnel__counter {
-    margin: var(--space-2) 0 0;
+    margin: 0;
     font-size: 12.5px;
+    font-weight: 600;
     color: var(--ink-faint);
-    letter-spacing: .3px;
+    letter-spacing: .4px;
+    text-transform: uppercase;
 }
 
 /* ----------------------------------------------------------------- stage */
+/* The card is the whole experience on mobile: edge-to-edge, generous padding. */
 .funnel__stage {
     flex: 1;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-md);
-    padding: var(--space-6) var(--space-5);
+    box-shadow:
+        0 1px 2px rgba(16, 32, 48, .04),
+        0 8px 28px -12px rgba(16, 32, 48, .16);
+    padding: var(--space-5) var(--space-4) var(--space-6);
+    transition: box-shadow var(--transition);
 }
 
 @media (min-width: 600px) {
-    .funnel__stage { padding: var(--space-7) var(--space-6); }
+    .funnel__stage {
+        padding: var(--space-7) var(--space-6);
+        border-radius: 22px;
+        box-shadow:
+            0 1px 2px rgba(16, 32, 48, .04),
+            0 20px 48px -20px rgba(16, 32, 48, .22);
+    }
 }
 
 /* ----------------------------------------------------------------- steps */
@@ -230,27 +280,38 @@ button { font: inherit; }
     align-items: center;
     gap: var(--space-3);
     width: 100%;
+    min-height: 56px;
     text-align: start;
     padding: var(--space-4);
     background: var(--surface);
     border: 1.5px solid var(--line);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: border-color var(--transition), box-shadow var(--transition), background var(--transition), transform var(--transition);
+    transition:
+        border-color var(--transition),
+        box-shadow var(--transition),
+        background var(--transition),
+        transform 120ms cubic-bezier(.22, .61, .36, 1);
 }
 
 .option:hover {
-    border-color: var(--brand-primary);
-    box-shadow: var(--shadow-sm);
+    border-color: color-mix(in srgb, var(--brand-primary) 55%, var(--line));
+    box-shadow: 0 2px 10px -4px rgba(16, 32, 48, .22);
 }
 
-.option:active { transform: scale(.995); }
+.option:focus-visible {
+    outline: none;
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 22%, transparent);
+}
+
+.option:active { transform: scale(.985); }
 
 .option[aria-pressed="true"],
 .option.is-selected {
     border-color: var(--brand-primary);
-    background: rgba(15, 46, 76, .04);
-    box-shadow: 0 0 0 3px rgba(15, 46, 76, .09);
+    background: color-mix(in srgb, var(--brand-primary) 5%, var(--surface));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 14%, transparent);
 }
 
 .option__marker {
@@ -315,7 +376,8 @@ button { font: inherit; }
 .field select,
 .field input {
     width: 100%;
-    padding: 12px 14px;
+    min-height: 48px;
+    padding: 13px 14px;
     font: inherit;
     font-size: 15px;
     color: var(--ink);
@@ -330,7 +392,7 @@ button { font: inherit; }
 .field input:focus {
     outline: none;
     border-color: var(--brand-primary);
-    box-shadow: 0 0 0 3px rgba(15, 46, 76, .1);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 16%, transparent);
 }
 
 .field__control[aria-invalid="true"] { border-color: var(--danger); }
@@ -365,7 +427,7 @@ button { font: inherit; }
 
 .consent.is-selected {
     border-color: var(--brand-primary);
-    background: rgba(15, 46, 76, .04);
+    background: color-mix(in srgb, var(--brand-primary) 5%, var(--surface));
 }
 
 .consent input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 2px; accent-color: var(--brand-primary); }
@@ -388,6 +450,11 @@ button { font: inherit; }
     align-items: center;
 }
 
+@media (max-width: 479px) {
+    .step__actions { gap: var(--space-2); }
+    .btn--primary { flex: 1; min-width: 0; }
+}
+
 .step__error {
     margin: var(--space-4) 0 0;
     padding: 10px 14px;
@@ -403,6 +470,7 @@ button { font: inherit; }
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
+    min-height: 50px;
     padding: 13px 26px;
     border: 1.5px solid transparent;
     border-radius: var(--radius-sm);
@@ -422,7 +490,13 @@ button { font: inherit; }
     min-width: 140px;
 }
 
-.btn--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--brand-primary) 88%, #000); }
+.btn--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--brand-primary) 86%, #000); }
+
+.btn--primary:focus-visible,
+.btn--ghost:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 26%, transparent);
+}
 
 .btn--ghost {
     background: transparent;
@@ -435,8 +509,9 @@ button { font: inherit; }
 .btn--whatsapp {
     background: var(--whatsapp);
     color: #fff;
-    margin-top: var(--space-5);
 }
+
+.btn--whatsapp:hover { background: #1eb958; }
 
 /* ---------------------------------------------------------------- states */
 .state { text-align: center; padding: var(--space-6) 0; }
@@ -457,13 +532,42 @@ button { font: inherit; }
     font-size: 15.5px;
 }
 
-.state__check { color: var(--brand-accent); margin-bottom: var(--space-4); }
+.state__check {
+    color: var(--brand-secondary);
+    margin-bottom: var(--space-4);
+    animation: check-in 420ms cubic-bezier(.22, .61, .36, 1);
+}
+
+@keyframes check-in {
+    from { opacity: 0; transform: scale(.86); }
+    to { opacity: 1; transform: none; }
+}
+
+.state__actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+}
+
+@media (min-width: 480px) {
+    .state__actions { flex-direction: row; justify-content: center; }
+}
+
+.state__redirect {
+    margin: var(--space-4) 0 0;
+    font-size: 13px;
+    color: var(--ink-faint);
+}
+
+.btn--centered { margin-inline-start: 0; }
 
 .spinner {
     display: inline-block;
     width: 26px;
     height: 26px;
-    border: 2.5px solid rgba(15, 46, 76, .15);
+    border: 2.5px solid color-mix(in srgb, var(--brand-primary) 18%, transparent);
     border-top-color: var(--brand-primary);
     border-radius: 50%;
     animation: spin 700ms linear infinite;
@@ -502,12 +606,14 @@ button { font: inherit; }
 }
 
 /* ------------------------------------------------------------ transitions */
-.step { animation: step-in 260ms cubic-bezier(.2, .7, .3, 1); }
+.step { animation: step-in 300ms cubic-bezier(.22, .61, .36, 1); }
 
 @keyframes step-in {
-    from { opacity: 0; transform: translateY(10px); }
+    from { opacity: 0; transform: translateY(12px); }
     to { opacity: 1; transform: none; }
 }
+
+.state--success { animation: step-in 320ms cubic-bezier(.22, .61, .36, 1); }
 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

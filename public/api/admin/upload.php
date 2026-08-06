@@ -21,7 +21,7 @@ use Lumera\Services\UploadService;
 
 $purpose = AdminEndpoint::stringParam($body, 'purpose', 'logo');
 
-if (!in_array($purpose, ['logo', 'background'], true)) {
+if (!in_array($purpose, ['logo', 'favicon', 'background'], true)) {
     Response::error('Unsupported upload purpose.', 400);
 }
 

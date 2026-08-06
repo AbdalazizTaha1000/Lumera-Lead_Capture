@@ -42,6 +42,10 @@ $e = static fn ($v) => Str::e((string) $v);
                 <span class="nav-item__icon" aria-hidden="true">▦</span>
                 <span class="nav-item__label">Dashboard</span>
             </a>
+            <a class="nav-item" href="#/funnels" data-route="funnels">
+                <span class="nav-item__icon" aria-hidden="true">⊞</span>
+                <span class="nav-item__label">Funnels</span>
+            </a>
             <a class="nav-item" href="#/builder" data-route="builder">
                 <span class="nav-item__icon" aria-hidden="true">⌗</span>
                 <span class="nav-item__label">Funnel Builder</span>
@@ -125,9 +129,22 @@ $e = static fn ($v) => Str::e((string) $v);
                 </div>
             </section>
 
+            <!-- --------------------------------------------------- funnels -->
+            <section class="view" id="view-funnels" hidden>
+                <div class="panel">
+                    <header class="panel__head">
+                        <h2 class="panel__title">All funnels</h2>
+                        <div class="panel__tools" id="funnels-tools"></div>
+                    </header>
+                    <div class="table-wrap" id="funnels-table"></div>
+                </div>
+            </section>
+
             <!-- --------------------------------------------------- builder -->
             <section class="view" id="view-builder" hidden>
                 <div class="publish-bar" id="publish-bar"></div>
+
+                <div class="funnel-switcher" id="funnel-switcher"></div>
 
                 <div class="builder">
                     <aside class="builder__list">
@@ -153,6 +170,14 @@ $e = static fn ($v) => Str::e((string) $v);
                         <span class="panel__hint">Shown on any Contact Information step</span>
                     </header>
                     <div class="panel__body" id="contact-fields"></div>
+                </section>
+
+                <section class="panel">
+                    <header class="panel__head">
+                        <h2 class="panel__title">Branding</h2>
+                        <span class="panel__hint">Shown on this funnel's public page</span>
+                    </header>
+                    <div class="panel__body" id="funnel-branding"></div>
                 </section>
 
                 <section class="panel">

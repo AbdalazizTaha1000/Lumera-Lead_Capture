@@ -30,13 +30,17 @@ $slug    = isset($_GET['slug']) ? preg_replace('/[^a-z0-9\-]/', '', strtolower((
 $preview = ($_GET['preview'] ?? '') === '1';
 
 $funnels = new FunnelRepository();
-$funnel  = $slug !== '' ? $funnels->findBySlug($slug) : $funnels->primary();
+$service = new FunnelService();
+
+// Preview may target an archived funnel (an admin is inspecting it); the public
+// path resolves only live funnels.
+$funnel = $preview
+    ? ($slug !== '' ? $funnels->findBySlug($slug) : $funnels->primary())
+    : ($slug !== '' ? $funnels->findPublicBySlug($slug) : $funnels->primaryPublic());
 
 if ($funnel === null) {
     Response::error('This form is not available.', 404);
 }
-
-$service = new FunnelService();
 
 if ($preview) {
     // Preview renders the DRAFT — so it must be an authenticated admin.
@@ -74,9 +78,12 @@ if ($preview) {
 $settings = new SettingsRepository();
 $public   = $settings->publicSettings();
 
+// Per-funnel branding wins; the global settings are only a fallback, so one
+// installation can serve any number of companies.
 $config['branding'] = [
-    'company_name'       => $public['company_name'] ?? 'Lumera Dubai Real Estate',
-    'company_logo'       => $public['company_logo'] ?? ($config['funnel']['theme']['logo'] ?? null),
+    'company_name'       => $config['funnel']['company_name'] ?? ($public['company_name'] ?? ''),
+    'company_logo'       => ($config['funnel']['theme']['logo'] ?? null) ?: ($public['company_logo'] ?? null),
+    'favicon'            => $config['funnel']['theme']['favicon'] ?? null,
     'privacy_policy_url' => $config['funnel']['privacy_policy_url'] ?? ($public['privacy_policy_url'] ?? null),
 ];
 

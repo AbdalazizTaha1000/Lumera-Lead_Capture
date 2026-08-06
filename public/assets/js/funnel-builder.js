@@ -15,6 +15,7 @@
 
     var state = {
         funnel: null,
+        funnels: [],
         steps: [],
         contactFields: [],
         status: null,
@@ -38,26 +39,86 @@
 
     function load() {
         return api('/api/admin/funnel.php?funnel_id=' + L.funnelId).then(function (data) {
+            var switchedFunnel = state.funnel && parseInt(state.funnel.id, 10) !== parseInt(data.funnel.id, 10);
+
             state.funnel = data.funnel;
+            state.funnels = data.funnels || [];
             state.steps = data.steps || [];
             state.contactFields = data.contact_fields || [];
             state.status = data.status || {};
             state.meta = data.meta || {};
 
-            if (state.selectedStepId === null && state.steps.length > 0) {
-                state.selectedStepId = parseInt(state.steps[0].id, 10);
+            // The builder keeps its own funnel id so the switcher survives a reload.
+            L.funnelId = parseInt(data.funnel.id, 10);
+
+            if (switchedFunnel) { state.selectedStepId = null; }
+
+            var stillExists = state.steps.some(function (s) {
+                return parseInt(s.id, 10) === state.selectedStepId;
+            });
+
+            if (!stillExists) {
+                state.selectedStepId = state.steps.length > 0 ? parseInt(state.steps[0].id, 10) : null;
             }
 
+            renderFunnelSwitcher();
             renderPublishBar();
             renderStepList();
             renderEditor();
             renderContactFields();
+            renderBranding();
             renderFunnelSettings();
         });
     }
 
     function reload() {
         return load().catch(function (error) { toast(error.message, 'error'); });
+    }
+
+    /* ===================================================== funnel switcher */
+    /**
+     * Lets the administrator move between funnels without leaving the builder.
+     * Every write below carries the funnel id explicitly, so switching can
+     * never apply an edit to the wrong funnel.
+     */
+    function renderFunnelSwitcher() {
+        var host = $('#funnel-switcher');
+        clear(host);
+
+        if (state.funnels.length === 0) { return; }
+
+        host.appendChild(el('span', 'funnel-switcher__label', 'Editing'));
+
+        var options = state.funnels.map(function (f) {
+            return {
+                value: f.id,
+                label: f.name + (f.is_archived ? ' (archived)' : '') + '  ·  /' + f.slug
+            };
+        });
+
+        var picker = L.select('funnel-picker', options, state.funnel.id);
+        picker.classList.add('funnel-switcher__select');
+
+        picker.addEventListener('change', function () {
+            L.openFunnelInBuilder(picker.value);
+        });
+
+        host.appendChild(picker);
+
+        var url = (state.meta && state.meta.public_url) || ('/' + state.funnel.slug);
+        var link = el('a', 'funnel-switcher__url', url);
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        host.appendChild(link);
+
+        if (state.funnel.archived_at) {
+            host.appendChild(L.badge('archived — not served publicly', 'muted'));
+        }
+
+        host.appendChild(L.button('All funnels', 'btn--ghost btn--sm', function () {
+            window.location.hash = '#/funnels';
+        }));
     }
 
     /* ======================================================== publish bar */
@@ -109,7 +170,11 @@
     }
 
     function openPreview() {
-        window.open('/admin/preview.php?slug=' + encodeURIComponent(L.funnelSlug), '_blank', 'noopener');
+        // Always preview the funnel currently loaded in the builder, not the
+        // installation's primary funnel.
+        var slug = (state.funnel && state.funnel.slug) || L.funnelSlug;
+
+        window.open('/admin/preview.php?slug=' + encodeURIComponent(slug), '_blank', 'noopener');
     }
 
     function publish() {
@@ -850,6 +915,156 @@
         L.modal.open('Edit contact field — ' + field.field_key, wrap, [cancel, save]);
     }
 
+    /* ============================================================ branding */
+    /**
+     * Shared uploader: posts to the existing upload endpoint and writes the
+     * returned path into a read-only field, saved with the surrounding form.
+     */
+    function uploadField(labelText, purpose, currentValue, helpText) {
+        var group = el('div', 'form-group');
+        group.appendChild(el('label', 'form-label', labelText));
+
+        var path = L.input('upload-' + purpose, currentValue || '');
+        path.readOnly = true;
+        path.placeholder = 'No file uploaded';
+        group.appendChild(path);
+
+        var row = el('div', 'upload-row');
+
+        var preview = document.createElement('img');
+        preview.className = 'upload-preview';
+        preview.alt = '';
+        preview.hidden = !currentValue;
+        if (currentValue) { preview.src = currentValue; }
+
+        var file = document.createElement('input');
+        file.type = 'file';
+        file.className = 'form-control';
+
+        var formats = (state.meta && state.meta[purpose + '_formats']) || ['png', 'webp'];
+        file.accept = formats.map(function (ext) { return '.' + ext; }).join(',');
+
+        file.addEventListener('change', function () {
+            if (!file.files || !file.files[0]) { return; }
+
+            var formData = new FormData();
+            formData.append('file', file.files[0]);
+            formData.append('purpose', purpose);
+
+            api('/api/admin/upload.php', { method: 'POST', body: formData })
+                .then(function (response) {
+                    path.value = response.path;
+                    preview.src = response.path;
+                    preview.hidden = false;
+                    toast('Uploaded. Remember to save.', 'success');
+                })
+                .catch(showErrors);
+        });
+
+        row.appendChild(file);
+        row.appendChild(preview);
+
+        row.appendChild(L.button('Clear', 'btn--ghost btn--sm', function () {
+            path.value = '';
+            preview.hidden = true;
+            file.value = '';
+        }));
+
+        group.appendChild(row);
+
+        var maxMb = (state.meta && state.meta.upload_max_mb) || 2;
+        group.appendChild(el('p', 'form-help',
+            (helpText ? helpText + ' ' : '') + formats.join(', ').toUpperCase() + ' up to ' + maxMb + ' MB.'));
+
+        return { group: group, input: path };
+    }
+
+    /** A colour swatch and hex field kept in sync. */
+    function colorField(labelText, id, value) {
+        var group = el('div', 'form-group');
+        group.appendChild(el('label', 'form-label', labelText));
+
+        var wrap = el('div', 'color-input');
+        var picker = document.createElement('input');
+        picker.type = 'color';
+        picker.value = (value || '#000000').slice(0, 7);
+
+        var text = L.input(id, value);
+        picker.addEventListener('input', function () { text.value = picker.value; });
+        text.addEventListener('input', function () {
+            if (/^#[0-9a-fA-F]{6}$/.test(text.value)) { picker.value = text.value; }
+        });
+
+        wrap.appendChild(picker);
+        wrap.appendChild(text);
+        group.appendChild(wrap);
+
+        return { group: group, input: text };
+    }
+
+    function renderBranding() {
+        var host = $('#funnel-branding');
+        clear(host);
+
+        var funnel = state.funnel;
+        if (!funnel) { return; }
+
+        var f = {};
+
+        var row1 = el('div', 'form-row form-row--2');
+
+        f.company_name = L.input('br-company', funnel.company_name);
+        row1.appendChild(L.formGroup('Company name', f.company_name,
+            'Shown on the public funnel, the browser tab and lead notifications.'));
+
+        var logo = uploadField('Company logo', 'logo', funnel.logo_path, 'Displayed at the top of the funnel.');
+        f.logo_path = logo.input;
+        row1.appendChild(logo.group);
+
+        host.appendChild(row1);
+
+        var row2 = el('div', 'form-row form-row--3');
+
+        var primary = colorField('Primary colour', 'br-primary', funnel.primary_color);
+        f.primary_color = primary.input;
+        row2.appendChild(primary.group);
+
+        var secondary = colorField('Secondary colour', 'br-secondary', funnel.accent_color);
+        f.accent_color = secondary.input;
+        row2.appendChild(secondary.group);
+
+        var background = colorField('Background colour', 'br-background', funnel.background_color);
+        f.background_color = background.input;
+        row2.appendChild(background.group);
+
+        host.appendChild(row2);
+
+        var row3 = el('div', 'form-row form-row--2');
+
+        var favicon = uploadField('Favicon (optional)', 'favicon', funnel.favicon_path,
+            'Browser tab icon for this funnel.');
+        f.favicon_path = favicon.input;
+        row3.appendChild(favicon.group);
+
+        var bg = uploadField('Background image (optional)', 'background', funnel.background_image_path, null);
+        f.background_image_path = bg.input;
+        row3.appendChild(bg.group);
+
+        host.appendChild(row3);
+
+        host.appendChild(L.button('Save branding', 'btn--primary', function () {
+            var payload = { funnel_id: L.funnelId };
+            Object.keys(f).forEach(function (key) { payload[key] = f[key].value; });
+
+            api('/api/admin/funnel.php', { method: 'POST', body: payload })
+                .then(function () {
+                    toast('Branding saved.', 'success');
+                    reload();
+                })
+                .catch(showErrors);
+        }));
+    }
+
     /* ===================================================== funnel settings */
     function renderFunnelSettings() {
         var host = $('#funnel-settings');
@@ -859,19 +1074,27 @@
         if (!funnel) { return; }
 
         var f = {};
+        var toggleBoxes = {};
 
-        var row1 = el('div', 'form-row form-row--2');
+        /* --- identity --- */
+        var row1 = el('div', 'form-row form-row--3');
+
         f.name = L.input('fn-name', funnel.name);
         row1.appendChild(L.formGroup('Funnel name', f.name));
 
+        f.slug = L.input('fn-slug', funnel.slug);
+        row1.appendChild(L.formGroup('Public URL slug', f.slug,
+            'Served at /' + funnel.slug + '. Changing it changes the public link.'));
+
         f.status = L.select('fn-status', [
-            { value: 'active', label: 'Active' },
-            { value: 'paused', label: 'Paused' },
-            { value: 'draft', label: 'Draft' }
+            { value: 'active', label: 'Active — publicly reachable' },
+            { value: 'paused', label: 'Paused — returns unavailable' },
+            { value: 'draft', label: 'Draft — not public yet' }
         ], funnel.status);
         row1.appendChild(L.formGroup('Funnel status', f.status));
         host.appendChild(row1);
 
+        /* --- languages --- */
         var row2 = el('div', 'form-row form-row--2');
         f.default_language = L.select('fn-lang', [
             { value: 'en', label: 'English' }, { value: 'ar', label: 'Arabic' }
@@ -882,34 +1105,7 @@
         row2.appendChild(L.formGroup('Enabled languages', f.enabled_languages, 'Comma separated, e.g. en,ar'));
         host.appendChild(row2);
 
-        var colors = el('div', 'form-row form-row--3');
-
-        [['primary_color', 'Primary colour'], ['accent_color', 'Accent colour'], ['background_color', 'Background colour']]
-            .forEach(function (pair) {
-                var group = el('div', 'form-group');
-                group.appendChild(el('label', 'form-label', pair[1]));
-
-                var wrap = el('div', 'color-input');
-                var picker = document.createElement('input');
-                picker.type = 'color';
-                picker.value = (funnel[pair[0]] || '#000000').slice(0, 7);
-
-                var text = L.input('fn-' + pair[0], funnel[pair[0]]);
-                picker.addEventListener('input', function () { text.value = picker.value; });
-                text.addEventListener('input', function () {
-                    if (/^#[0-9a-fA-F]{6}$/.test(text.value)) { picker.value = text.value; }
-                });
-
-                wrap.appendChild(picker);
-                wrap.appendChild(text);
-                group.appendChild(wrap);
-                colors.appendChild(group);
-
-                f[pair[0]] = text;
-            });
-
-        host.appendChild(colors);
-
+        /* --- labels --- */
         var labelsRow = el('div', 'form-row form-row--2');
         f.submit_label_en = L.input('fn-submit-en', funnel.submit_label_en);
         f.submit_label_ar = L.input('fn-submit-ar', funnel.submit_label_ar);
@@ -931,12 +1127,51 @@
         messageRow.appendChild(L.formGroup('Success message (Arabic)', f.success_message_ar));
         host.appendChild(messageRow);
 
+        var buttonRow = el('div', 'form-row form-row--2');
+        f.success_button_en = L.input('fn-sb-en', funnel.success_button_en);
+        f.success_button_ar = L.input('fn-sb-ar', funnel.success_button_ar);
+        buttonRow.appendChild(L.formGroup('Success button (English)', f.success_button_en,
+            'Shown on the success screen when a redirect URL is set.'));
+        buttonRow.appendChild(L.formGroup('Success button (Arabic)', f.success_button_ar));
+        host.appendChild(buttonRow);
+
         var waRow = el('div', 'form-row form-row--2');
         f.whatsapp_label_en = L.input('fn-wa-en', funnel.whatsapp_label_en);
         f.whatsapp_label_ar = L.input('fn-wa-ar', funnel.whatsapp_label_ar);
         waRow.appendChild(L.formGroup('WhatsApp button (English)', f.whatsapp_label_en));
         waRow.appendChild(L.formGroup('WhatsApp button (Arabic)', f.whatsapp_label_ar));
         host.appendChild(waRow);
+
+        /* --- delivery --- */
+        host.appendChild(el('p', 'editor__section-title', 'Lead delivery'));
+
+        var deliveryRow = el('div', 'form-row form-row--2');
+        f.recipient_email = L.input('fn-recipient', funnel.recipient_email, 'text', 'sales@example.com');
+        deliveryRow.appendChild(L.formGroup('Email recipient', f.recipient_email,
+            'Comma separated. Leave empty to use LEAD_RECIPIENT_EMAIL from .env.'));
+
+        f.redirect_url = L.input('fn-redirect', funnel.redirect_url, 'url', 'https://…');
+        deliveryRow.appendChild(L.formGroup('Redirect URL (optional)', f.redirect_url,
+            'Where the visitor goes after the success screen.'));
+        host.appendChild(deliveryRow);
+
+        var webhookRow = el('div', 'form-row form-row--2');
+        f.webhook_url = L.input('fn-webhook', funnel.webhook_url, 'url', 'https://hooks.zapier.com/…');
+        webhookRow.appendChild(L.formGroup('Zapier webhook URL', f.webhook_url,
+            'The lead is POSTed as JSON. A delivery failure never loses the lead.'));
+
+        f.redirect_delay = L.input('fn-redirect-delay', funnel.redirect_delay, 'number');
+        webhookRow.appendChild(L.formGroup('Redirect delay (seconds)', f.redirect_delay,
+            '0 redirects immediately.'));
+        host.appendChild(webhookRow);
+
+        var webhookToggle = L.checkbox('fn-webhook-enabled', 'Enable webhook',
+            parseInt(funnel.webhook_enabled, 10) === 1);
+        toggleBoxes.webhook_enabled = webhookToggle.querySelector('input');
+        host.appendChild(webhookToggle);
+
+        /* --- behaviour --- */
+        host.appendChild(el('p', 'editor__section-title', 'Behaviour'));
 
         var urlRow = el('div', 'form-row form-row--2');
         f.privacy_policy_url = L.input('fn-privacy', funnel.privacy_policy_url, 'url');
@@ -948,7 +1183,6 @@
         host.appendChild(urlRow);
 
         var toggles = el('div', 'form-row form-row--3');
-        var toggleBoxes = {};
 
         [
             ['whatsapp_enabled', 'WhatsApp CTA'],
@@ -963,45 +1197,6 @@
         });
 
         host.appendChild(toggles);
-
-        /* logo + background upload */
-        var uploadRow = el('div', 'form-row form-row--2');
-
-        [['logo_path', 'Funnel logo', 'logo'], ['background_image_path', 'Background image', 'background']]
-            .forEach(function (spec) {
-                var group = el('div', 'form-group');
-                group.appendChild(el('label', 'form-label', spec[1]));
-
-                var path = L.input('fn-' + spec[0], funnel[spec[0]] || '');
-                path.readOnly = true;
-                group.appendChild(path);
-
-                var file = document.createElement('input');
-                file.type = 'file';
-                file.className = 'form-control';
-                file.accept = '.png,.jpg,.jpeg,.webp';
-
-                file.addEventListener('change', function () {
-                    if (!file.files || !file.files[0]) { return; }
-
-                    var formData = new FormData();
-                    formData.append('file', file.files[0]);
-                    formData.append('purpose', spec[2]);
-
-                    api('/api/admin/upload.php', { method: 'POST', body: formData })
-                        .then(function (response) {
-                            path.value = response.path;
-                            toast('Image uploaded. Remember to save.', 'success');
-                        })
-                        .catch(showErrors);
-                });
-
-                group.appendChild(file);
-                uploadRow.appendChild(group);
-                f[spec[0]] = path;
-            });
-
-        host.appendChild(uploadRow);
 
         host.appendChild(L.button('Save funnel settings', 'btn--primary', function () {
             var payload = { funnel_id: L.funnelId };

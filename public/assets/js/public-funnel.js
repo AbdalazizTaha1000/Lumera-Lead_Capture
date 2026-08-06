@@ -41,7 +41,9 @@
             pattern: 'Please check the format of your answer.',
             generic_error: 'Something went wrong. Please try again.',
             select_placeholder: 'Please choose…',
-            preview_note: 'Preview mode — submissions are disabled.'
+            preview_note: 'Preview mode — submissions are disabled.',
+            continue: 'Continue',
+            redirecting: 'Redirecting you in {n} seconds…'
         },
         ar: {
             loading: 'جارٍ التحميل…',
@@ -67,7 +69,9 @@
             pattern: 'يرجى التحقق من صيغة الإجابة.',
             generic_error: 'حدث خطأ ما. يرجى المحاولة مرة أخرى.',
             select_placeholder: 'يرجى الاختيار…',
-            preview_note: 'وضع المعاينة — الإرسال معطّل.'
+            preview_note: 'وضع المعاينة — الإرسال معطّل.',
+            continue: 'متابعة',
+            redirecting: 'سيتم تحويلك خلال {n} ثوانٍ…'
         }
     };
 
@@ -107,7 +111,13 @@
         successTitle: document.getElementById('success-title'),
         successMessage: document.getElementById('success-message'),
         whatsapp: document.getElementById('whatsapp-cta'),
+        successCta: document.getElementById('success-cta'),
+        redirectNote: document.getElementById('redirect-note'),
         privacy: document.getElementById('privacy-link'),
+        company: document.getElementById('footer-company'),
+        wordmark: document.querySelector('.funnel__wordmark'),
+        logo: document.querySelector('.funnel__logo'),
+        brand: document.querySelector('.funnel__brand'),
         honeypot: document.getElementById('company_website')
     };
 
@@ -888,12 +898,14 @@
         showOnly(el.success);
         el.progress.hidden = true;
 
+        var labels = (state.config.funnel.labels || {});
+
         el.successTitle.textContent = success.title
-            || localized((state.config.funnel.labels || {}).success_title)
+            || localized(labels.success_title)
             || 'Thank you';
 
         el.successMessage.textContent = success.message
-            || localized((state.config.funnel.labels || {}).success_message)
+            || localized(labels.success_message)
             || '';
 
         var whatsapp = success.whatsapp || state.config.whatsapp;
@@ -903,6 +915,30 @@
             el.whatsapp.href = 'https://wa.me/' + whatsapp.number + text;
             el.whatsapp.textContent = localized(whatsapp.label) || 'WhatsApp';
             el.whatsapp.hidden = false;
+        }
+
+        // Optional redirect: the button appears immediately, the automatic jump
+        // is announced and delayed so the visitor can read the confirmation.
+        var redirect = success.redirect || (state.config.funnel.redirect && state.config.funnel.redirect.url
+            ? state.config.funnel.redirect : null);
+        var buttonLabel = success.button || localized(labels.success_button) || '';
+
+        if (redirect && redirect.url) {
+            el.successCta.href = redirect.url;
+            el.successCta.textContent = buttonLabel || t('continue');
+            el.successCta.rel = 'noopener';
+            el.successCta.hidden = false;
+
+            var delay = Math.max(0, parseInt(redirect.delay, 10) || 0);
+
+            if (delay > 0 && !state.preview) {
+                el.redirectNote.textContent = t('redirecting', { n: delay });
+                el.redirectNote.hidden = false;
+
+                window.setTimeout(function () {
+                    window.location.href = redirect.url;
+                }, delay * 1000);
+            }
         }
 
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -966,16 +1002,59 @@
             });
     }
 
+    /**
+     * Applies the funnel's own branding. Nothing here is hardcoded to a
+     * particular company: colours, logo, favicon and company name all come from
+     * the published configuration.
+     */
     function applyBranding() {
         var funnel = state.config.funnel || {};
+        var branding = state.config.branding || {};
         var theme = funnel.theme || {};
         var style = document.documentElement.style;
 
         if (theme.primary) { style.setProperty('--brand-primary', theme.primary); }
-        if (theme.accent) { style.setProperty('--brand-accent', theme.accent); }
+        if (theme.secondary || theme.accent) {
+            style.setProperty('--brand-secondary', theme.secondary || theme.accent);
+            style.setProperty('--brand-accent', theme.secondary || theme.accent);
+        }
         if (theme.background) { style.setProperty('--brand-background', theme.background); }
 
-        var privacyUrl = (state.config.branding && state.config.branding.privacy_policy_url) || funnel.privacy_policy_url;
+        var company = branding.company_name || funnel.company_name || '';
+        var logo = branding.company_logo || theme.logo || '';
+
+        if (company) {
+            document.title = (funnel.name ? funnel.name + ' — ' : '') + company;
+            if (el.company) { el.company.textContent = company; }
+            if (el.wordmark) { el.wordmark.textContent = company; }
+            if (el.logo) { el.logo.alt = company; }
+        }
+
+        // The server already renders the logo; this keeps the preview in step
+        // when the administrator changes it without reloading.
+        if (logo && el.brand) {
+            if (el.logo) {
+                el.logo.src = logo;
+            } else {
+                var img = document.createElement('img');
+                img.className = 'funnel__logo';
+                img.src = logo;
+                img.alt = company;
+                clear(el.brand);
+                el.brand.appendChild(img);
+                el.logo = img;
+            }
+        }
+
+        var favicon = branding.favicon || theme.favicon;
+
+        if (favicon) {
+            var link = document.querySelector('link[rel="icon"]');
+
+            if (link) { link.href = favicon; }
+        }
+
+        var privacyUrl = branding.privacy_policy_url || funnel.privacy_policy_url;
 
         if (privacyUrl) {
             el.privacy.href = privacyUrl;

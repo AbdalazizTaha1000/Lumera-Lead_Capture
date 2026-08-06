@@ -25,3 +25,14 @@ AddType text/plain .php .phtml .phar
 </FilesMatch>
 
 Options -ExecCGI -Indexes
+
+# Uploaded SVGs are sanitised on the way in; this is the second layer. An SVG
+# opened directly still gets no scripts, no network access and no same-origin
+# privileges.
+<IfModule mod_headers.c>
+    <FilesMatch "\.svg$">
+        Header set Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+        Header set X-Content-Type-Options "nosniff"
+        Header set Content-Disposition "inline"
+    </FilesMatch>
+</IfModule>

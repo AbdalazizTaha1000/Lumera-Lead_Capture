@@ -8,21 +8,23 @@ SET NAMES utf8mb4;
 
 -- ------------------------------------------------------------------ funnel --
 INSERT INTO `funnels`
-    (`id`, `slug`, `name`, `status`, `default_language`, `enabled_languages`,
+    (`id`, `slug`, `name`, `company_name`, `status`, `default_language`, `enabled_languages`,
      `primary_color`, `accent_color`, `background_color`,
      `submit_label_en`, `submit_label_ar`,
      `success_title_en`, `success_title_ar`,
      `success_message_en`, `success_message_ar`,
+     `success_button_en`, `success_button_ar`,
      `whatsapp_enabled`, `whatsapp_label_en`, `whatsapp_label_ar`,
      `progress_bar_enabled`, `step_counter_enabled`, `back_button_enabled`,
      `save_progress_enabled`, `min_completion_seconds`, `draft_updated_at`)
 VALUES
-    (1, 'property-finder', 'Lumera Property Finder', 'active', 'en', 'en,ar',
+    (1, 'property-finder', 'Lumera Property Finder', 'Lumera Dubai Real Estate', 'active', 'en', 'en,ar',
      '#0F2E4C', '#C9A227', '#F7F8FA',
      'Submit', 'إرسال',
      'Thank you', 'شكراً لك',
      'Your preferences have been received. A Lumera property consultant will contact you shortly with suitable options.',
      'تم استلام تفضيلاتك. سيتواصل معك أحد مستشاري لوميرا العقاريين قريباً لمشاركة الخيارات المناسبة.',
+     'Done', 'تم',
      1, 'Chat on WhatsApp', 'تواصل عبر واتساب',
      1, 1, 1, 1, 5, NOW())
 ON DUPLICATE KEY UPDATE `id` = `id`;

@@ -24,7 +24,7 @@ $funnel   = (new FunnelRepository())->primary();
 $view = [
     'admin'    => $admin,
     'csrf'     => Csrf::token('admin'),
-    'company'  => (string) $settings->get('company_name', 'Lumera Dubai Real Estate'),
+    'company'  => (string) $settings->get('company_name', 'Lead Capture'),
     'funnelId' => $funnel !== null ? (int) $funnel['id'] : 0,
     'funnelSlug' => $funnel !== null ? (string) $funnel['slug'] : '',
     'timezones' => timezone_identifiers_list(),

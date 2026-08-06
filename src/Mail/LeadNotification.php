@@ -23,14 +23,21 @@ final class LeadNotification
     /**
      * @param array<string,mixed> $lead
      * @param list<array<string,mixed>> $answers
+     * @param array<string,mixed>|null $funnel the funnel row, for per-funnel routing and branding
      * @return array{ok: bool, error?: string, skipped?: bool}
      */
-    public function send(array $lead, array $answers): array
+    public function send(array $lead, array $answers, ?array $funnel = null): array
     {
-        $recipient = Config::string('LEAD_RECIPIENT_EMAIL', '');
+        // A funnel may route its leads to its own inbox; the .env value is the
+        // fallback for funnels that do not set one.
+        $recipient = trim((string) ($funnel['recipient_email'] ?? ''));
 
         if ($recipient === '') {
-            return ['ok' => false, 'skipped' => true, 'error' => 'LEAD_RECIPIENT_EMAIL is not set.'];
+            $recipient = Config::string('LEAD_RECIPIENT_EMAIL', '');
+        }
+
+        if ($recipient === '') {
+            return ['ok' => false, 'skipped' => true, 'error' => 'No lead recipient is configured.'];
         }
 
         if (!$this->mailer->isConfigured()) {
@@ -39,11 +46,11 @@ final class LeadNotification
 
         $recipients = array_map('trim', explode(',', $recipient));
 
-        $view = $this->viewData($lead, $answers);
+        $view = $this->viewData($lead, $answers, $funnel);
 
         return $this->mailer->send(
             $recipients,
-            $this->subject($lead, $answers),
+            $this->subject($lead, $answers, $funnel),
             $this->render('lead-notification.php', $view),
             $this->renderText($view),
             is_string($lead['email'] ?? null) ? $lead['email'] : null,
@@ -54,8 +61,9 @@ final class LeadNotification
     /**
      * @param array<string,mixed> $lead
      * @param list<array<string,mixed>> $answers
+     * @param array<string,mixed>|null $funnel
      */
-    public function subject(array $lead, array $answers): string
+    public function subject(array $lead, array $answers, ?array $funnel = null): string
     {
         $template = (string) $this->settings->get(
             'notification_subject_template',
@@ -80,7 +88,8 @@ final class LeadNotification
             '{purpose}'   => $purpose,
             '{budget}'    => $budget,
             '{score}'     => (string) ($lead['lead_score'] ?? 0),
-            '{funnel}'    => (string) ($lead['funnel_name'] ?? 'Lumera'),
+            '{funnel}'    => (string) ($funnel['name'] ?? $lead['funnel_name'] ?? ''),
+            '{company}'   => $this->companyName($funnel),
         ]);
 
         return Str::clean($subject, 190);
@@ -89,22 +98,30 @@ final class LeadNotification
     /**
      * @param array<string,mixed> $lead
      * @param list<array<string,mixed>> $answers
+     * @param array<string,mixed>|null $funnel
      * @return array<string,mixed>
      */
-    private function viewData(array $lead, array $answers): array
+    private function viewData(array $lead, array $answers, ?array $funnel = null): array
     {
         $normalized = (string) ($lead['phone_normalized'] ?? '');
         $digits     = Phone::whatsappDigits($normalized);
+        $company    = $this->companyName($funnel);
 
         $whatsappMessage = sprintf(
-            'Hello %s, this is Lumera Dubai Real Estate following up on your property enquiry.',
-            (string) ($lead['full_name'] ?? '')
+            'Hello %s, this is %s following up on your enquiry.',
+            (string) ($lead['full_name'] ?? ''),
+            $company
         );
 
         return [
             'lead'      => $lead,
             'answers'   => $answers,
-            'company'   => (string) $this->settings->get('company_name', 'Lumera Dubai Real Estate'),
+            'company'   => $company,
+            'brand'     => [
+                'primary' => (string) ($funnel['primary_color'] ?? '#0F2E4C'),
+                'accent'  => (string) ($funnel['accent_color'] ?? '#C9A227'),
+                'logo'    => $this->absoluteUrl($funnel['logo_path'] ?? null),
+            ],
             'adminUrl'  => Config::appUrl() . '/admin/#/leads/' . (int) ($lead['id'] ?? 0),
             'whatsappUrl' => $digits !== ''
                 ? 'https://wa.me/' . $digits . '?text=' . rawurlencode($whatsappMessage)
@@ -121,6 +138,39 @@ final class LeadNotification
                 'Landing page' => $lead['landing_page'] ?? null,
             ],
         ];
+    }
+
+    /**
+     * The company the notification is branded as: the funnel's own name first,
+     * then the global setting, then the mail-from name.
+     *
+     * @param array<string,mixed>|null $funnel
+     */
+    private function companyName(?array $funnel): string
+    {
+        $company = trim((string) ($funnel['company_name'] ?? ''));
+
+        if ($company !== '') {
+            return $company;
+        }
+
+        $global = trim((string) $this->settings->get('company_name', ''));
+
+        return $global !== '' ? $global : Config::string('MAIL_FROM_NAME', 'Lead Capture');
+    }
+
+    /** Turns a stored upload path into an absolute URL for the email client. */
+    private function absoluteUrl(?string $path): ?string
+    {
+        $path = trim((string) $path);
+
+        if ($path === '' || !str_starts_with($path, '/')) {
+            return null;
+        }
+
+        $base = Config::appUrl();
+
+        return $base !== '' ? $base . $path : null;
     }
 
     /** @param array<string,mixed> $data */

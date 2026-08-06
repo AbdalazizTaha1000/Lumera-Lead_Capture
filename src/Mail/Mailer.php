@@ -79,7 +79,7 @@ final class Mailer
 
             $mail->setFrom(
                 Config::string('MAIL_FROM_ADDRESS', ''),
-                Config::string('MAIL_FROM_NAME', 'Lumera Dubai Real Estate')
+                Config::string('MAIL_FROM_NAME', 'Lead Capture')
             );
 
             foreach ($recipients as $address) {

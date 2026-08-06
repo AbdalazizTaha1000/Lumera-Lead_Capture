@@ -123,11 +123,37 @@ function runSqlFile(string $path): int
     $count = 0;
 
     foreach ($statements as $statement) {
-        $pdo->exec($statement);
+        // PREPARE/EXECUTE in the conditional-DDL migrations returns a result
+        // set that must be consumed before the next statement can run.
+        $stmt = $pdo->query($statement);
+
+        if ($stmt !== false) {
+            $stmt->closeCursor();
+        }
+
         $count++;
     }
 
     return $count;
+}
+
+/**
+ * Applies every file in database/migrations in filename order.
+ * The migrations are written to be idempotent, so re-running is safe.
+ */
+function runMigrations(string $basePath): array
+{
+    $files = glob($basePath . '/database/migrations/*.sql') ?: [];
+    sort($files);
+
+    $applied = [];
+
+    foreach ($files as $file) {
+        $statements = runSqlFile($file);
+        $applied[basename($file)] = $statements;
+    }
+
+    return $applied;
 }
 
 function promptHidden(string $label): string
@@ -165,6 +191,10 @@ try {
         case 'migrate':
             $applied = runSqlFile($basePath . '/database/schema.sql');
             out("Schema applied ({$applied} statements).");
+
+            foreach (runMigrations($basePath) as $name => $count) {
+                out("  migration {$name} ({$count} statements).");
+            }
             break;
 
         // ------------------------------------------------------------------
@@ -178,6 +208,11 @@ try {
             out('→ Applying schema…');
             $applied = runSqlFile($basePath . '/database/schema.sql');
             out("  {$applied} statements applied.");
+
+            out('→ Applying migrations…');
+            foreach (runMigrations($basePath) as $name => $count) {
+                out("  {$name} ({$count} statements).");
+            }
 
             out('→ Seeding the Lumera Property Finder funnel…');
             $applied = runSqlFile($basePath . '/database/seed.sql');

@@ -424,6 +424,308 @@
         host.appendChild(actions);
     }
 
+    /* ============================================================ funnels */
+    var funnelState = { includeArchived: false, rows: [] };
+
+    Lumera.views.funnels = {
+        title: 'Funnels',
+        subtitle: 'Every funnel on this installation, with its own branding and URL',
+        actions: function () {
+            return [button('New funnel', 'btn--primary btn--sm', openCreateFunnel)];
+        },
+        render: loadFunnels
+    };
+
+    function loadFunnels() {
+        return api('/api/admin/funnels.php' + (funnelState.includeArchived ? '?include_archived=1' : ''))
+            .then(function (data) {
+                funnelState.rows = data.funnels || [];
+                renderFunnelTools(data);
+                renderFunnelTable(data.funnels || []);
+            });
+    }
+
+    function renderFunnelTools(data) {
+        var host = $('#funnels-tools');
+        clear(host);
+
+        var toggle = checkbox('show-archived', 'Show archived', funnelState.includeArchived);
+        toggle.querySelector('input').addEventListener('change', function () {
+            funnelState.includeArchived = this.checked;
+            loadFunnels().catch(function (e) { toast(e.message, 'error'); });
+        });
+
+        host.appendChild(toggle);
+
+        if (data.archived > 0 && !funnelState.includeArchived) {
+            host.appendChild(badge(data.archived + ' archived', 'muted'));
+        }
+    }
+
+    /** Small logo thumbnail, falling back to the funnel's brand initial. */
+    function funnelMark(funnel) {
+        if (funnel.logo_path) {
+            var img = el('img', 'funnel-mark__img');
+            img.src = funnel.logo_path;
+            img.alt = funnel.company_name || funnel.name;
+            img.loading = 'lazy';
+            return img;
+        }
+
+        var mark = el('span', 'funnel-mark', (funnel.company_name || funnel.name || '?').charAt(0).toUpperCase());
+        mark.style.background = funnel.primary_color || '#0F2E4C';
+        mark.style.color = funnel.accent_color || '#fff';
+
+        return mark;
+    }
+
+    function renderFunnelTable(funnels) {
+        var host = $('#funnels-table');
+        clear(host);
+
+        if (funnels.length === 0) {
+            host.appendChild(emptyState('No funnels yet', 'Create your first funnel to start capturing leads.'));
+            return;
+        }
+
+        var rows = funnels.map(function (funnel) {
+            var tr = el('tr');
+
+            if (funnel.is_archived) { tr.className = 'is-archived'; }
+
+            var markCell = el('td');
+            markCell.appendChild(funnelMark(funnel));
+            tr.appendChild(markCell);
+
+            var nameCell = el('td');
+            nameCell.appendChild(el('div', 'cell-title', funnel.name));
+            nameCell.appendChild(el('div', 'cell-sub', funnel.company_name || '—'));
+            tr.appendChild(nameCell);
+
+            var slugCell = el('td');
+            slugCell.appendChild(el('code', 'cell-code', '/' + funnel.slug));
+            tr.appendChild(slugCell);
+
+            var statusCell = el('td');
+            if (funnel.is_archived) {
+                statusCell.appendChild(badge('archived', 'muted'));
+            } else {
+                statusCell.appendChild(badge(funnel.status, funnel.status === 'active' ? 'success' : 'warning'));
+            }
+            if (funnel.webhook_enabled) { statusCell.appendChild(badge('webhook', 'info')); }
+            tr.appendChild(statusCell);
+
+            tr.appendChild(el('td', 'num', funnel.leads_count));
+
+            var publishedCell = el('td', 'muted');
+            publishedCell.textContent = funnel.published_version > 0
+                ? 'v' + funnel.published_version + ' · ' + relative(funnel.published_at)
+                : 'never published';
+            tr.appendChild(publishedCell);
+
+            var actions = el('td');
+            var group = el('div', 'row-actions');
+
+            group.appendChild(button('Edit', 'btn--ghost btn--sm', function () {
+                Lumera.openFunnelInBuilder(funnel.id);
+            }));
+
+            var openLink = el('a', 'btn btn--ghost btn--sm', 'Open');
+            openLink.href = funnel.public_url;
+            openLink.target = '_blank';
+            openLink.rel = 'noopener noreferrer';
+            openLink.title = funnel.public_url;
+
+            if (funnel.is_archived || funnel.status !== 'active') {
+                openLink.classList.add('is-disabled');
+                openLink.title = 'The public URL is only live while the funnel is active and not archived.';
+            }
+
+            group.appendChild(openLink);
+
+            group.appendChild(button('Duplicate', 'btn--ghost btn--sm', function () {
+                openDuplicateFunnel(funnel);
+            }));
+
+            if (funnel.is_archived) {
+                group.appendChild(button('Restore', 'btn--ghost btn--sm', function () {
+                    funnelAction('restore', funnel, 'Funnel restored.');
+                }));
+            } else {
+                group.appendChild(button('Archive', 'btn--ghost btn--sm', function () {
+                    confirmAction(
+                        'Archive funnel',
+                        '"' + funnel.name + '" will stop serving its public URL and disappear from the active list. '
+                        + 'Nothing is deleted and you can restore it at any time.',
+                        'Archive'
+                    ).then(function (ok) {
+                        if (ok) { funnelAction('archive', funnel, 'Funnel archived.'); }
+                    });
+                }));
+            }
+
+            group.appendChild(button('Delete', 'btn--danger btn--sm', function () {
+                openDeleteFunnel(funnel);
+            }));
+
+            actions.appendChild(group);
+            tr.appendChild(actions);
+
+            return tr;
+        });
+
+        host.appendChild(table(
+            ['', 'Funnel', 'Slug', 'Status', 'Leads', 'Last published', 'Actions'],
+            rows
+        ));
+    }
+
+    function funnelAction(action, funnel, successMessage) {
+        return api('/api/admin/funnels.php', { method: 'POST', body: { action: action, funnel_id: funnel.id } })
+            .then(function () {
+                toast(successMessage, 'success');
+                loadFunnels();
+            })
+            .catch(function (error) { toast(error.message, 'error'); });
+    }
+
+    function slugify(value) {
+        return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120);
+    }
+
+    function openCreateFunnel() {
+        var wrap = el('div');
+
+        var name = input('new-funnel-name', '', 'text', 'e.g. Reef 996 Launch');
+        wrap.appendChild(formGroup('Funnel name', name));
+
+        var company = input('new-funnel-company', '', 'text', 'e.g. Reef Developments');
+        wrap.appendChild(formGroup('Company name', company, 'Shown on the public funnel and in notifications.'));
+
+        var slug = input('new-funnel-slug', '', 'text', 'reef-996');
+        wrap.appendChild(formGroup('Public URL slug', slug, 'The funnel will be served at /<slug>.'));
+
+        // Keep the slug in step with the name until the user edits it directly.
+        var slugTouched = false;
+        slug.addEventListener('input', function () { slugTouched = true; });
+        name.addEventListener('input', function () {
+            if (!slugTouched) { slug.value = slugify(name.value); }
+        });
+
+        var cancel = button('Cancel', 'btn--ghost', function () { modal.close(); });
+
+        var create = button('Create funnel', 'btn--primary', function () {
+            api('/api/admin/funnels.php', {
+                method: 'POST',
+                body: {
+                    action: 'create',
+                    name: name.value,
+                    company_name: company.value,
+                    slug: slug.value || slugify(name.value)
+                }
+            }).then(function (data) {
+                modal.close();
+                toast('Funnel created as a draft.', 'success');
+                Lumera.openFunnelInBuilder(data.funnel.id);
+            }).catch(function (error) {
+                if (error.data && error.data.errors) {
+                    toast(Object.values(error.data.errors)[0], 'error');
+                    return;
+                }
+                toast(error.message, 'error');
+            });
+        });
+
+        modal.open('New funnel', wrap, [cancel, create]);
+    }
+
+    function openDuplicateFunnel(funnel) {
+        var wrap = el('div');
+
+        wrap.appendChild(el('p', 'form-help',
+            'Steps, options, contact fields, conditional rules, branding and settings are copied. '
+            + 'Leads, analytics and audit history are not. The copy starts as an unpublished draft.'));
+
+        var name = input('dup-name', funnel.name + ' (Copy)');
+        wrap.appendChild(formGroup('New funnel name', name));
+
+        var slug = input('dup-slug', slugify(funnel.slug + '-copy'));
+        wrap.appendChild(formGroup('New URL slug', slug));
+
+        var cancel = button('Cancel', 'btn--ghost', function () { modal.close(); });
+
+        var run = button('Duplicate', 'btn--primary', function () {
+            api('/api/admin/funnels.php', {
+                method: 'POST',
+                body: { action: 'duplicate', funnel_id: funnel.id, name: name.value, slug: slug.value }
+            }).then(function (data) {
+                modal.close();
+                toast('Funnel duplicated as "' + data.funnel.name + '".', 'success');
+                loadFunnels();
+            }).catch(function (error) { toast(error.message, 'error'); });
+        });
+
+        modal.open('Duplicate funnel', wrap, [cancel, run]);
+    }
+
+    function openDeleteFunnel(funnel) {
+        var wrap = el('div');
+
+        wrap.appendChild(el('p', null,
+            'Permanently delete "' + funnel.name + '"? Its steps, options and contact fields are removed.'));
+
+        if (funnel.leads_count > 0) {
+            var warn = el('p', 'alert alert--warning',
+                funnel.leads_count + ' lead(s) were captured by this funnel. They are kept in the database with '
+                + 'their answers intact and stay visible under Leads — but they will no longer be linked to a funnel.');
+            wrap.appendChild(warn);
+        }
+
+        if (funnel.published_version > 0) {
+            wrap.appendChild(el('p', 'alert alert--warning',
+                'This funnel is published (v' + funnel.published_version + ') and is serving /' + funnel.slug + '. '
+                + 'Consider archiving instead — archiving is reversible.'));
+        }
+
+        var needsConfirm = funnel.leads_count > 0 || funnel.published_version > 0;
+        var confirmBox = null;
+
+        if (needsConfirm) {
+            confirmBox = checkbox('confirm-permanent', 'I understand this is permanent and cannot be undone', false);
+            wrap.appendChild(confirmBox);
+        }
+
+        var cancel = button('Cancel', 'btn--ghost', function () { modal.close(); });
+
+        var archiveInstead = button('Archive instead', 'btn--ghost', function () {
+            modal.close();
+            funnelAction('archive', funnel, 'Funnel archived.');
+        });
+
+        var remove = button('Delete permanently', 'btn--danger', function () {
+            if (needsConfirm && !confirmBox.querySelector('input').checked) {
+                toast('Tick the confirmation box to delete this funnel.', 'error');
+                return;
+            }
+
+            api('/api/admin/funnels.php', {
+                method: 'POST',
+                body: { action: 'delete', funnel_id: funnel.id, confirm_permanent: needsConfirm }
+            }).then(function (data) {
+                modal.close();
+                toast(
+                    data.leads_retained > 0
+                        ? 'Funnel deleted. ' + data.leads_retained + ' lead(s) were kept.'
+                        : 'Funnel deleted.',
+                    'success'
+                );
+                loadFunnels();
+            }).catch(function (error) { toast(error.message, 'error'); });
+        });
+
+        modal.open('Delete funnel', wrap, [cancel, archiveInstead, remove]);
+    }
+
     /* ============================================================== leads */
     var leadState = {
         filters: { search: '', status: '', date_from: '', date_to: '', source: '', campaign: '', budget: '', purpose: '' },
@@ -985,7 +1287,7 @@
     }
 
     /* ============================================================= router */
-    var ROUTES = ['dashboard', 'builder', 'leads', 'settings'];
+    var ROUTES = ['dashboard', 'funnels', 'builder', 'leads', 'settings'];
 
     function currentRoute() {
         var hash = (window.location.hash || '').replace(/^#\/?/, '');
@@ -1024,7 +1326,7 @@
             if (error && error.message !== 'unauthenticated') { toast(error.message, 'error'); }
         });
 
-        // Deep link: #/leads/123 opens the lead directly.
+        // Deep links: #/leads/123 opens a lead, #/builder/4 opens that funnel.
         var parts = (window.location.hash || '').replace(/^#\/?/, '').split('/');
         if (route === 'leads' && parts[1]) { openLeadDetail(parts[1]); }
 
@@ -1070,6 +1372,18 @@
 
     Lumera.openLeadDetail = openLeadDetail;
     Lumera.navigate = navigate;
+
+    /** Switches the builder to a funnel and routes there. */
+    Lumera.openFunnelInBuilder = function (funnelId) {
+        Lumera.funnelId = parseInt(funnelId, 10);
+
+        if (currentRoute() === 'builder') {
+            navigate();
+            return;
+        }
+
+        window.location.hash = '#/builder';
+    };
 
     bindChrome();
 

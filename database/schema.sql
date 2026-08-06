@@ -34,14 +34,16 @@ CREATE TABLE IF NOT EXISTS `funnels` (
     `id`                     INT UNSIGNED NOT NULL AUTO_INCREMENT,
     `slug`                   VARCHAR(120) NOT NULL,
     `name`                   VARCHAR(190) NOT NULL,
+    `company_name`           VARCHAR(190) NOT NULL DEFAULT '',        -- per-funnel branding
     `status`                 VARCHAR(20) NOT NULL DEFAULT 'active',   -- active | paused | draft
     `default_language`       VARCHAR(5) NOT NULL DEFAULT 'en',
     `enabled_languages`      VARCHAR(64) NOT NULL DEFAULT 'en,ar',    -- comma separated
 
     `logo_path`              VARCHAR(255) NULL DEFAULT NULL,
+    `favicon_path`           VARCHAR(255) NULL DEFAULT NULL,
     `background_image_path`  VARCHAR(255) NULL DEFAULT NULL,
     `primary_color`          VARCHAR(9) NOT NULL DEFAULT '#0F2E4C',
-    `accent_color`           VARCHAR(9) NOT NULL DEFAULT '#C9A227',
+    `accent_color`           VARCHAR(9) NOT NULL DEFAULT '#C9A227',   -- the "secondary" brand colour
     `background_color`       VARCHAR(9) NOT NULL DEFAULT '#F7F8FA',
 
     `submit_label_en`        VARCHAR(120) NOT NULL DEFAULT 'Submit',
@@ -50,6 +52,16 @@ CREATE TABLE IF NOT EXISTS `funnels` (
     `success_title_ar`       VARCHAR(190) NOT NULL DEFAULT 'شكراً لك',
     `success_message_en`     TEXT NULL,
     `success_message_ar`     TEXT NULL,
+    `success_button_en`      VARCHAR(120) NOT NULL DEFAULT 'Done',
+    `success_button_ar`      VARCHAR(120) NOT NULL DEFAULT 'تم',
+
+    -- Per-funnel delivery settings. Secrets stay in .env; these are per-funnel
+    -- destinations, not credentials.
+    `recipient_email`        VARCHAR(500) NULL DEFAULT NULL,          -- overrides LEAD_RECIPIENT_EMAIL
+    `redirect_url`           VARCHAR(500) NULL DEFAULT NULL,
+    `redirect_delay`         SMALLINT UNSIGNED NOT NULL DEFAULT 5,
+    `webhook_url`            VARCHAR(500) NULL DEFAULT NULL,
+    `webhook_enabled`        TINYINT(1) NOT NULL DEFAULT 0,
 
     `privacy_policy_url`     VARCHAR(255) NULL DEFAULT NULL,
     `whatsapp_enabled`       TINYINT(1) NOT NULL DEFAULT 1,
@@ -68,10 +80,12 @@ CREATE TABLE IF NOT EXISTS `funnels` (
 
     `created_at`             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `archived_at`            DATETIME NULL DEFAULT NULL,              -- restorable; hidden from public
     `deleted_at`             DATETIME NULL DEFAULT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uq_funnels_slug` (`slug`),
-    KEY `idx_funnels_status` (`status`)
+    KEY `idx_funnels_status` (`status`),
+    KEY `idx_funnels_archived` (`archived_at`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

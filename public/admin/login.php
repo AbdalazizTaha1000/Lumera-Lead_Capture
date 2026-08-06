@@ -21,7 +21,7 @@ if (Auth::check()) {
 }
 
 $csrf    = Csrf::token('admin_login');
-$company = (new SettingsRepository())->get('company_name', 'Lumera Dubai Real Estate');
+$company = (new SettingsRepository())->get('company_name', 'Lead Capture');
 $e       = static fn ($v) => Str::e((string) $v);
 ?>
 <!doctype html>

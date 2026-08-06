@@ -110,21 +110,34 @@ final class FunnelService
                 'id'                => (int) $funnel['id'],
                 'slug'              => (string) $funnel['slug'],
                 'name'              => (string) $funnel['name'],
+                // Branding is per funnel, so one installation can serve many
+                // companies from the same code.
+                'company_name'      => $this->companyName($funnel),
                 'status'            => (string) $funnel['status'],
                 'default_language'  => (string) $funnel['default_language'],
                 'languages'         => $this->languages($funnel),
                 'theme'             => [
                     'primary'    => (string) $funnel['primary_color'],
+                    'secondary'  => (string) $funnel['accent_color'],
                     'accent'     => (string) $funnel['accent_color'],
                     'background' => (string) $funnel['background_color'],
                     'logo'       => $funnel['logo_path'] ?: null,
+                    'favicon'    => ($funnel['favicon_path'] ?? '') ?: null,
                     'background_image' => $funnel['background_image_path'] ?: null,
                 ],
                 'labels'            => [
                     'submit'          => ['en' => (string) $funnel['submit_label_en'], 'ar' => (string) $funnel['submit_label_ar']],
                     'success_title'   => ['en' => (string) $funnel['success_title_en'], 'ar' => (string) $funnel['success_title_ar']],
                     'success_message' => ['en' => (string) ($funnel['success_message_en'] ?? ''), 'ar' => (string) ($funnel['success_message_ar'] ?? '')],
+                    'success_button'  => ['en' => (string) ($funnel['success_button_en'] ?? ''), 'ar' => (string) ($funnel['success_button_ar'] ?? '')],
                     'whatsapp'        => ['en' => (string) $funnel['whatsapp_label_en'], 'ar' => (string) $funnel['whatsapp_label_ar']],
+                ],
+                // Public-facing only. The email recipient and the webhook URL
+                // are deliberately NOT in the snapshot: they are read live,
+                // server-side, at submission time and never reach a browser.
+                'redirect'          => [
+                    'url'   => ($funnel['redirect_url'] ?? '') ?: null,
+                    'delay' => (int) ($funnel['redirect_delay'] ?? 5),
                 ],
                 'privacy_policy_url' => $funnel['privacy_policy_url'] ?: null,
                 'ui'                => [
@@ -255,6 +268,19 @@ final class FunnelService
         }
 
         return $index;
+    }
+
+    /**
+     * The company this funnel is branded as. Falls back to the funnel name so a
+     * funnel is never rendered unbranded.
+     *
+     * @param array<string,mixed> $funnel
+     */
+    public function companyName(array $funnel): string
+    {
+        $company = trim((string) ($funnel['company_name'] ?? ''));
+
+        return $company !== '' ? $company : (string) ($funnel['name'] ?? '');
     }
 
     /** @param array<string,mixed> $funnel */

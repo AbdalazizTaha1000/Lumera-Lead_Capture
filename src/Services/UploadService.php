@@ -6,16 +6,21 @@ namespace Lumera\Services;
 
 use Lumera\Core\Config;
 use Lumera\Core\Logger;
+use Lumera\Support\SvgSanitizer;
 
 /**
- * Hardened image upload for the logo and the funnel background.
+ * Hardened image upload for logos, favicons and funnel backgrounds.
  *
- * SVG is NOT accepted: safe SVG sanitisation is out of scope for this MVP, and
- * the brief requires it to be rejected rather than accepted unsanitised.
+ * SVG is accepted only because every uploaded SVG is rewritten through
+ * {@see SvgSanitizer} before it is stored: the file that lands on disk is a
+ * rebuilt document containing nothing but allow-listed shapes and attributes.
+ * The uploads directory additionally refuses to execute anything and serves a
+ * locked-down Content-Security-Policy.
  */
 final class UploadService
 {
-    private const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
+    private const DEFAULT_MAX_MB = 2;
+    private const HARD_MAX_MB    = 10;
 
     /** extension => allowed MIME types */
     private const ALLOWED = [
@@ -23,7 +28,31 @@ final class UploadService
         'jpg'  => ['image/jpeg'],
         'jpeg' => ['image/jpeg'],
         'webp' => ['image/webp'],
+        'svg'  => ['image/svg+xml', 'text/xml', 'text/plain', 'application/xml', 'application/svg+xml'],
+        'ico'  => ['image/vnd.microsoft.icon', 'image/x-icon', 'image/ico'],
     ];
+
+    /** Purpose => extensions accepted for it. */
+    private const PURPOSE_EXTENSIONS = [
+        'logo'       => ['png', 'svg', 'webp', 'jpg', 'jpeg'],
+        'favicon'    => ['png', 'svg', 'webp', 'ico'],
+        'background' => ['png', 'webp', 'jpg', 'jpeg'],
+    ];
+
+    /** Configurable ceiling, clamped so a misconfiguration cannot open it wide. */
+    public function maxBytes(): int
+    {
+        $configured = Config::int('UPLOAD_MAX_SIZE_MB', self::DEFAULT_MAX_MB);
+        $megabytes  = max(1, min(self::HARD_MAX_MB, $configured));
+
+        return $megabytes * 1024 * 1024;
+    }
+
+    /** @return list<string> extensions accepted for a purpose */
+    public function allowedExtensions(string $purpose): array
+    {
+        return self::PURPOSE_EXTENSIONS[$purpose] ?? self::PURPOSE_EXTENSIONS['logo'];
+    }
 
     /**
      * @param array<string,mixed> $file entry from $_FILES
@@ -47,17 +76,29 @@ final class UploadService
             return ['ok' => false, 'error' => 'Invalid upload.'];
         }
 
-        $size = (int) ($file['size'] ?? 0);
+        $size    = (int) ($file['size'] ?? 0);
+        $maxBytes = $this->maxBytes();
 
-        if ($size <= 0 || $size > self::MAX_BYTES) {
-            return ['ok' => false, 'error' => 'The file must be 2 MB or smaller.'];
+        if ($size <= 0 || $size > $maxBytes) {
+            return [
+                'ok'    => false,
+                'error' => sprintf('The file must be %d MB or smaller.', (int) ($maxBytes / 1024 / 1024)),
+            ];
         }
 
+        $purpose   = self::PURPOSE_EXTENSIONS[$prefix] ?? null;
         $original  = (string) ($file['name'] ?? '');
         $extension = strtolower((string) pathinfo($original, PATHINFO_EXTENSION));
 
         if (!isset(self::ALLOWED[$extension])) {
-            return ['ok' => false, 'error' => 'Allowed formats: PNG, JPG, JPEG, WEBP.'];
+            return ['ok' => false, 'error' => 'Unsupported file format.'];
+        }
+
+        if ($purpose !== null && !in_array($extension, $purpose, true)) {
+            return [
+                'ok'    => false,
+                'error' => 'Allowed formats: ' . strtoupper(implode(', ', $purpose)) . '.',
+            ];
         }
 
         $finfo = new \finfo(FILEINFO_MIME_TYPE);
@@ -67,11 +108,29 @@ final class UploadService
             return ['ok' => false, 'error' => 'The file content does not match its extension.'];
         }
 
-        // Must decode as a real raster image.
-        $info = @getimagesize($tmp);
+        $sanitizedSvg = null;
 
-        if ($info === false || (int) $info[0] < 1 || (int) $info[1] < 1) {
-            return ['ok' => false, 'error' => 'The file is not a valid image.'];
+        if ($extension === 'svg') {
+            $raw = @file_get_contents($tmp);
+
+            if ($raw === false) {
+                return ['ok' => false, 'error' => 'The file could not be read.'];
+            }
+
+            $result = (new SvgSanitizer())->sanitize($raw);
+
+            if (!$result['ok']) {
+                return ['ok' => false, 'error' => $result['error'] ?? 'The SVG could not be sanitised.'];
+            }
+
+            $sanitizedSvg = $result['svg'];
+        } elseif ($extension !== 'ico') {
+            // Raster formats must actually decode as an image.
+            $info = @getimagesize($tmp);
+
+            if ($info === false || (int) $info[0] < 1 || (int) $info[1] < 1) {
+                return ['ok' => false, 'error' => 'The file is not a valid image.'];
+            }
         }
 
         $dir = Config::basePath('public/assets/uploads');
@@ -91,13 +150,25 @@ final class UploadService
 
         $destination = $dir . '/' . $filename;
 
-        if (!@move_uploaded_file($tmp, $destination)) {
+        if ($sanitizedSvg !== null) {
+            // The sanitised rewrite is what gets stored — never the original.
+            if (@file_put_contents($destination, $sanitizedSvg) === false) {
+                return ['ok' => false, 'error' => 'The file could not be saved.'];
+            }
+
+            @unlink($tmp);
+        } elseif (!@move_uploaded_file($tmp, $destination)) {
             return ['ok' => false, 'error' => 'The file could not be saved.'];
         }
 
         @chmod($destination, 0644);
 
-        Logger::info('upload.stored', ['file' => $filename, 'mime' => $mime, 'bytes' => $size]);
+        Logger::info('upload.stored', [
+            'file'      => $filename,
+            'mime'      => $mime,
+            'bytes'     => $size,
+            'sanitized' => $sanitizedSvg !== null,
+        ]);
 
         return [
             'ok'   => true,

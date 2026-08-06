@@ -26,17 +26,18 @@ framework, no frontend build step.
 14. [File permissions](#14-file-permissions)
 15. [SMTP configuration](#15-smtp-configuration)
 16. [Admin login](#16-admin-login)
-17. [Editing funnel steps](#17-editing-funnel-steps)
-18. [Adding options](#18-adding-options)
-19. [Adding a new step](#19-adding-a-new-step)
-20. [Publishing changes](#20-publishing-changes)
-21. [Viewing leads](#21-viewing-leads)
-22. [Exporting CSV](#22-exporting-csv)
-23. [Updating branding](#23-updating-branding)
-24. [Inspecting logs](#24-inspecting-logs)
-25. [Security notes](#25-security-notes)
-26. [Backup guidance](#26-backup-guidance)
-27. [Troubleshooting](#27-troubleshooting)
+17. [Managing funnels](#17-managing-funnels)
+18. [Editing funnel steps](#18-editing-funnel-steps)
+19. [Adding options](#19-adding-options)
+20. [Adding a new step](#20-adding-a-new-step)
+21. [Publishing changes](#21-publishing-changes)
+22. [Viewing leads](#22-viewing-leads)
+23. [Exporting CSV](#23-exporting-csv)
+24. [Updating branding](#24-updating-branding)
+25. [Inspecting logs](#25-inspecting-logs)
+26. [Security notes](#26-security-notes)
+27. [Backup guidance](#27-backup-guidance)
+28. [Troubleshooting](#28-troubleshooting)
 
 ---
 
@@ -46,8 +47,22 @@ The system has two surfaces:
 
 | Surface | URL | Purpose |
 |---|---|---|
-| Public funnel | `https://go.lumeradubai.com/` | A one-question-at-a-time lead capture funnel in English and Arabic |
-| Admin dashboard | `https://go.lumeradubai.com/admin/` | Login-protected funnel builder, lead management and settings |
+| Public funnel | `https://go.lumeradubai.com/<slug>` | A one-question-at-a-time lead capture funnel in English and Arabic |
+| Default funnel | `https://go.lumeradubai.com/` | The primary funnel, served at the root |
+| Admin dashboard | `https://go.lumeradubai.com/admin/` | Login-protected funnels list, funnel builder, lead management and settings |
+
+**The installation hosts as many funnels as you need**, each with its own URL
+slug, company branding, colours, logo, favicon, email recipient, webhook and
+success behaviour:
+
+```text
+go.lumeradubai.com/reef-996
+go.lumeradubai.com/luxury-villas
+go.lumeradubai.com/property-finder
+```
+
+Branding is per funnel, not per installation, so one deployment can serve any
+number of companies.
 
 The funnel is **not hardcoded**. Every step, question, option, label,
 translation, validation rule, colour and button caption is stored in the
@@ -58,7 +73,8 @@ percentages — all of it is fetched at runtime from the published configuration
 
 The seeded funnel is **Lumera Property Finder** (`property-finder`) with six
 steps: property purpose, property type, budget, preferred location, contact
-information and privacy consent.
+information and privacy consent. Create further funnels from
+**Admin → Funnels**, or duplicate an existing one.
 
 ---
 
@@ -76,10 +92,10 @@ lumera-lead-capture/
 │   │   └── preview.php           draft preview (auth required)
 │   ├── api/
 │   │   ├── public/               session.php · funnel.php · submit-lead.php
-│   │   └── admin/                login · logout · dashboard · funnel · steps ·
-│   │                             options · contact-fields · publish · leads ·
-│   │                             lead-details · lead-status · lead-notes ·
-│   │                             export · settings · upload
+│   │   └── admin/                login · logout · dashboard · funnels · funnel ·
+│   │                             steps · options · contact-fields · publish ·
+│   │                             leads · lead-details · lead-status ·
+│   │                             lead-notes · export · settings · upload
 │   └── assets/
 │       ├── css/                  public.css · admin.css
 │       ├── js/                   public-funnel.js · admin.js · funnel-builder.js
@@ -90,10 +106,11 @@ lumera-lead-capture/
 │   │                             AuditLog, SubmissionToken, AdminEndpoint
 │   ├── Repositories/             Funnel, Step, Option, ContactField, Version,
 │   │                             Lead, Settings, AdminUser
-│   ├── Services/                 Funnel, Publish, Lead, Export, Upload, Dashboard
+│   ├── Services/                 Funnel, FunnelManager, Publish, Lead,
+│   │                             Webhook, Export, Upload, Dashboard
 │   ├── Validators/               SubmissionValidator, StepValidator
 │   ├── Mail/                     Mailer (PHPMailer/SMTP), LeadNotification
-│   └── Support/                  Request, Str, Phone, StepType
+│   └── Support/                  Request, Str, Phone, StepType, SvgSanitizer
 ├── database/                     schema.sql · seed.sql · migrations/
 ├── storage/                      logs/ · cache/ · rate-limit/
 ├── templates/                    public/ · admin/ · email/
@@ -266,9 +283,22 @@ php bin/console.php install
 Individual steps are also available:
 
 ```bash
-php bin/console.php migrate    # database/schema.sql
+php bin/console.php migrate    # database/schema.sql + database/migrations/*.sql
 php bin/console.php seed       # database/seed.sql
 php bin/console.php funnel:publish
+php bin/console.php funnel:status
+```
+
+### Upgrading an existing installation
+
+`migrate` is the upgrade path. It re-applies the schema (every statement is
+`CREATE TABLE IF NOT EXISTS`) and then every file in `database/migrations/` in
+filename order. The migrations inspect `information_schema` and emit only the
+changes that are actually missing, so running `migrate` repeatedly is safe and
+no lead data is touched:
+
+```bash
+php bin/console.php migrate
 php bin/console.php funnel:status
 ```
 
@@ -288,6 +318,12 @@ Both SQL files are idempotent and safe to re-run.
 `funnel_contact_fields`, `funnel_versions`, `leads`, `lead_answers`,
 `lead_notes`, `app_settings`, `login_attempts`, `rate_limit_entries`,
 `audit_logs`.
+
+`funnels` carries the per-funnel branding (`company_name`, `logo_path`,
+`favicon_path`, `primary_color`, `accent_color`, `background_color`), the
+per-funnel delivery settings (`recipient_email`, `redirect_url`,
+`redirect_delay`, `webhook_url`, `webhook_enabled`), the success-button
+captions and `archived_at`.
 
 ---
 
@@ -556,7 +592,117 @@ IP and per email, CSRF tokens on every state-changing request, a generic
 
 ---
 
-## 17. Editing funnel steps
+## 17. Managing funnels
+
+**Admin → Funnels** lists every funnel with its logo, name, slug, status, lead
+count, last published version and actions.
+
+### Create
+
+**New funnel** asks for a name, a company name and a URL slug (the slug is
+derived from the name as you type). A new funnel starts as a **draft**, is
+seeded with the standard contact fields and one starter step, and is not public
+until you publish it and set its status to Active.
+
+Slugs must be unique and may not collide with an application path
+(`admin`, `api`, `assets`, `storage`, `vendor`, `src`, `bin`, `database`,
+`templates`, `f`).
+
+### Edit
+
+**Edit** opens the funnel in the Funnel Builder. A switcher at the top of the
+builder moves between funnels without leaving the screen, and shows the public
+URL of whichever funnel is loaded.
+
+### Duplicate
+
+**Duplicate** deep-copies a funnel:
+
+| Copied | Not copied |
+|---|---|
+| Steps | Leads |
+| Options and scores | Lead answers and notes |
+| Contact fields | Published versions |
+| Conditional rules | Audit history |
+| Branding (company, logo, colours, favicon) | |
+| Settings (labels, recipient, webhook, redirect, toggles) | |
+
+The copy is created as an unpublished **draft** with its own slug, so it can
+never go live by accident. Conditional rules reference step *keys*, not row
+ids, so they stay valid inside the copy without any remapping.
+
+### Archive
+
+**Archive** takes a funnel out of service without deleting anything:
+
+* its public URL returns 404,
+* it stops accepting submissions,
+* it disappears from the active list (tick **Show archived** to see it),
+* every step, option, lead and published version is retained.
+
+**Restore** puts it straight back. Nothing is ever archived or deleted
+automatically.
+
+### Delete
+
+**Delete** is permanent and removes the funnel's steps, options, contact fields
+and published versions.
+
+It is deliberately hard to do by accident:
+
+* a funnel that has ever been published, or that has collected leads, requires
+  an explicit "I understand this is permanent" confirmation;
+* the dialogue offers **Archive instead** as the reversible alternative;
+* the last remaining funnel cannot be deleted at all.
+
+**Leads are never deleted.** `leads.funnel_id` is `ON DELETE SET NULL` and every
+answer carries its own label snapshot, so submissions captured by a deleted
+funnel stay in the database, stay visible under **Leads**, and stay fully
+readable — they are simply no longer linked to a funnel. The response reports
+how many leads were retained, and the deletion is audit-logged.
+
+### Per-funnel settings
+
+Each funnel carries its own:
+
+| Setting | Effect |
+|---|---|
+| Email recipient | Overrides `LEAD_RECIPIENT_EMAIL` for this funnel only. Comma separated. Empty falls back to `.env`. |
+| Success message / title / button | Shown on the success screen, per language |
+| Redirect URL + delay | Where the visitor goes after submitting; the delay is announced on screen and the button is always clickable immediately |
+| Zapier webhook URL | The lead is POSTed as JSON |
+| Enable webhook | Turns delivery on; a URL is required first |
+| Status | `active`, `paused` or `draft` |
+| Branding | See [section 24](#24-updating-branding) |
+
+The email recipient and the webhook URL are **server-side only**. They are read
+live at submission time and are deliberately kept out of the published snapshot,
+so they can never reach a browser.
+
+### Webhook payload
+
+```json
+{
+  "event": "lead.created",
+  "sent_at": "2026-02-01T12:00:00+04:00",
+  "funnel":  { "id": 2, "slug": "reef-996", "name": "…", "company_name": "…", "version": 3 },
+  "lead":    { "id": 41, "full_name": "…", "phone_normalized": "+9715…", "email": "…",
+               "lead_score": 40, "consent_given": true, "submitted_at": "…" },
+  "answers": { "property_purpose": { "question": "…", "type": "single_select",
+                                     "value": "invest", "label": "Invest" } },
+  "attribution": { "utm_source": "google", "gclid": "…", "landing_page": "…" }
+}
+```
+
+Delivery is best-effort and follows the same contract as email: the lead is
+committed first, a failure is logged for review, and the visitor always sees the
+success screen. Webhook URLs must be public `http(s)` endpoints — loopback and
+private ranges are rejected, so the dashboard cannot be used to probe the
+server's own network.
+
+---
+
+## 18. Editing funnel steps
 
 **Funnel Builder → select a step on the left.**
 
@@ -611,7 +757,7 @@ lead record depend on them. This keeps existing leads readable.
 
 ---
 
-## 18. Adding options
+## 19. Adding options
 
 Select a selection step, then **Add option**:
 
@@ -633,7 +779,7 @@ Seeded scores: `invest` 20, `buy` 15, `rent` 5, `exploring` 0, `2m_5m` 20,
 
 ---
 
-## 19. Adding a new step
+## 20. Adding a new step
 
 1. **Funnel Builder → Add Step.**
 2. Give it an internal key (e.g. `timeline`), pick a type, write the English
@@ -649,7 +795,7 @@ counter and navigation all recompute from the live step count.
 
 ---
 
-## 20. Publishing changes
+## 21. Publishing changes
 
 The Funnel Builder header shows the published version, the last published
 time, whether the draft has unpublished changes, and the next version number.
@@ -672,7 +818,7 @@ Rollback: every version is retained in `funnel_versions`. To go back, set
 
 ---
 
-## 21. Viewing leads
+## 22. Viewing leads
 
 **Leads** lists every submission with the name, phone, email, purpose, budget,
 score, status, email delivery status and submission time.
@@ -700,7 +846,7 @@ The raw IP is only ever shown when `STORE_RAW_IP=true`.
 
 ---
 
-## 22. Exporting CSV
+## 23. Exporting CSV
 
 **Leads → Export CSV** downloads the currently filtered set.
 
@@ -714,31 +860,61 @@ Exports are audit-logged with the row count and the filters used.
 
 ---
 
-## 23. Updating branding
+## 24. Updating branding
 
-**Funnel Builder → Funnel settings** controls the public funnel: name, status,
-default and enabled languages, primary/accent/background colours, submit button
-captions, success title and message, WhatsApp button captions, privacy policy
-URL, minimum completion time, logo, background image, and the progress bar,
-step counter, back button, WhatsApp CTA and sessionStorage toggles.
+Branding lives **on the funnel**, so one installation serves any number of
+companies. **Funnel Builder → Branding** controls, per funnel:
 
-**Settings** covers application-wide values: company display name, logo,
-default interface language, timezone, privacy policy URL and the notification
-subject template (tokens: `{lead_id}`, `{full_name}`, `{purpose}`, `{budget}`,
-`{score}`, `{funnel}`).
+| Field | Notes |
+|---|---|
+| Company name | Shown on the public page, the browser tab and lead notifications |
+| Company logo | PNG, SVG, WebP, JPG — rendered at the top of the funnel |
+| Primary colour | Headings, buttons, progress bar, selected states |
+| Secondary colour | Progress gradient, accents, success tick |
+| Background colour | Page background |
+| Favicon | Browser-tab icon for this funnel (optional) |
+| Background image | Optional page backdrop |
 
-Uploads accept PNG, JPG, JPEG and WEBP up to 2 MB. **SVG is rejected** — safe
-SVG sanitisation is out of scope for this release, so it is not accepted
-unsanitised. Uploads are validated by extension, by real MIME type and by
-decoding as an image, are given a generated filename, and land in a directory
-where script execution is disabled.
+**Funnel Builder → Funnel settings** covers the rest: name, slug, status,
+languages, submit/success/WhatsApp captions, email recipient, redirect,
+webhook, privacy URL, minimum completion time and the UI toggles.
 
-The colour and branding settings apply immediately; step and option changes
-still require Publish.
+**Settings** (top-level) still holds installation-wide values — company display
+name, logo, default interface language, timezone, privacy URL and the
+notification subject template. These act as the *fallback* when a funnel has not
+set its own.
+
+Branding changes apply immediately; step and option changes still require
+Publish.
+
+### Uploads
+
+Accepted formats per purpose:
+
+| Purpose | Formats |
+|---|---|
+| Logo | PNG, SVG, WebP, JPG, JPEG |
+| Favicon | PNG, SVG, WebP, ICO |
+| Background | PNG, WebP, JPG, JPEG |
+
+The size ceiling is configurable with `UPLOAD_MAX_SIZE_MB` (default 2, clamped
+to 1–10 by the application).
+
+Every upload is validated by extension, by real MIME type and — for raster
+formats — by decoding as an image, then stored under a generated filename in a
+directory where script execution is disabled.
+
+**SVG is accepted because every uploaded SVG is rewritten before it is stored.**
+`SvgSanitizer` parses the file and rebuilds it from an explicit allow-list of
+elements and attributes; scripts, event handlers, `foreignObject`, external
+references and `javascript:` URLs are dropped, and any document containing a
+DOCTYPE or entity declaration is rejected outright rather than sanitised. The
+file that lands on disk is the sanitised rewrite, never the original. Uploaded
+SVGs are additionally served with `Content-Security-Policy: default-src 'none'; sandbox`.
 
 ---
 
-## 24. Inspecting logs
+## 25. Inspecting logs
 
 Application logs are JSON lines in `storage/logs/app-YYYY-MM-DD.log`:
 
@@ -768,7 +944,7 @@ Apache logs: `/var/log/apache2/go.lumeradubai.com-{error,access}.log`.
 
 ---
 
-## 25. Security notes
+## 26. Security notes
 
 **Data access** — every query uses PDO prepared statements with emulation
 disabled. Admin input reaches SQL only through explicit column allow-lists.
@@ -811,9 +987,19 @@ built with DOM APIs and `textContent`, never string-concatenated HTML.
 **Errors** — the public gets generic messages; details go to the log. Stack
 traces and SQL errors are never exposed when `APP_DEBUG=false`.
 
-**Uploads** — extension, MIME and image-decode validation, 2 MB cap, generated
-filenames, and PHP execution disabled in the upload directory by both
-`.htaccess` and the VirtualHost.
+**Uploads** — extension, MIME and image-decode validation, a configurable size
+cap, generated filenames, and PHP execution disabled in the upload directory by
+both `.htaccess` and the VirtualHost. Uploaded SVGs are rewritten through an
+allow-list sanitiser before storage and served with a locked-down CSP.
+
+**Outbound webhooks** — administrator-supplied URLs must be public `http(s)`
+endpoints. Loopback, link-local, private and reserved ranges are rejected, host
+names are resolved and checked, and redirects are not followed, so the webhook
+field cannot be turned into a probe against internal services.
+
+**Funnel deletion** — guarded by an explicit permanent-delete confirmation
+whenever a funnel is published or has leads, blocked entirely for the last
+remaining funnel, and structurally incapable of removing lead data.
 
 **Secrets** — only ever in `.env`. The settings API returns booleans such as
 `smtp_configured`, never a credential, and the settings write path is a fixed
@@ -830,7 +1016,7 @@ API and the CSV export otherwise.
 
 ---
 
-## 26. Backup guidance
+## 27. Backup guidance
 
 Database (the critical asset — it holds leads *and* the funnel configuration):
 
@@ -866,7 +1052,7 @@ Housekeeping — prune expired rate-limit windows and old login attempts:
 
 ---
 
-## 27. Troubleshooting
+## 28. Troubleshooting
 
 **"This form is not available yet." on the public funnel**
 The funnel has never been published. Run `php bin/console.php funnel:publish`
@@ -939,6 +1125,36 @@ off immediately afterwards.
 **Arabic renders as question marks**
 Confirm the database, tables and connection are all `utf8mb4`
 (`DB_CHARSET=utf8mb4`).
+
+**A funnel URL returns 404**
+The slug does not resolve to a live funnel. Check that it is spelled correctly,
+that the funnel is not archived (Admin → Funnels → Show archived), and that its
+status is Active. Archived and draft funnels are invisible to the public router
+by design.
+
+**A new funnel shows "This form is not available yet."**
+It has never been published. Open it in the Funnel Builder and press Publish
+Changes.
+
+**Leads from one funnel appear under another**
+They do not — check the funnel column in Admin → Funnels for the lead counts.
+Leads whose funnel was deleted show no funnel; they are retained deliberately.
+
+**A logo will not upload**
+Check the format against the table in [section 24](#24-updating-branding), the
+size against `UPLOAD_MAX_SIZE_MB`, and that `public/assets/uploads` is writable.
+An SVG that carries a DOCTYPE or entity declaration is rejected outright rather
+than sanitised — re-export it from your design tool without one.
+
+**The webhook never fires**
+Confirm the URL is saved *and* "Enable webhook" is ticked, then check the log:
+
+```bash
+grep webhook storage/logs/app-*.log | tail
+```
+
+Private and loopback URLs are refused at save time; the endpoint must be
+publicly reachable.
 
 **Verify a deployment end to end**
 

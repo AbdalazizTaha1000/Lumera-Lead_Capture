@@ -15,6 +15,11 @@ final class AuditLog
     public const LOGIN_FAILURE   = 'login_failure';
     public const LOGOUT          = 'logout';
     public const FUNNEL_UPDATED  = 'funnel_updated';
+    public const FUNNEL_CREATED    = 'funnel_created';
+    public const FUNNEL_DUPLICATED = 'funnel_duplicated';
+    public const FUNNEL_ARCHIVED   = 'funnel_archived';
+    public const FUNNEL_RESTORED   = 'funnel_restored';
+    public const FUNNEL_DELETED    = 'funnel_deleted';
     public const STEP_CREATED    = 'step_created';
     public const STEP_UPDATED    = 'step_updated';
     public const STEP_DELETED    = 'step_deleted';

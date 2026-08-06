@@ -43,8 +43,9 @@ $view = [
     'funnel'          => $funnel,
     'slug'            => (string) $funnel['slug'],
     'name'            => (string) $funnel['name'],
-    'companyName'     => $public['company_name'] ?? 'Lumera Dubai Real Estate',
-    'logo'            => $public['company_logo'] ?? ($funnel['logo_path'] ?? ''),
+    'companyName'     => $service->companyName($funnel),
+    'logo'            => ($funnel['logo_path'] ?? '') ?: ($public['company_logo'] ?? ''),
+    'favicon'         => (string) ($funnel['favicon_path'] ?? ''),
     'backgroundImage' => (string) ($funnel['background_image_path'] ?? ''),
     'theme'           => [
         'primary'    => (string) $funnel['primary_color'],
@@ -58,6 +59,8 @@ $view = [
     'preview'         => true,
 ];
 
-extract($view, EXTR_SKIP);
+// EXTR_OVERWRITE so the resolved funnel's slug wins over the requested one,
+// which is empty when no ?slug= is supplied.
+extract($view, EXTR_OVERWRITE);
 
 require dirname(__DIR__, 2) . '/templates/public/funnel.php';

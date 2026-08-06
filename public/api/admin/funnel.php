@@ -18,6 +18,8 @@ use Lumera\Repositories\FunnelRepository;
 use Lumera\Repositories\OptionRepository;
 use Lumera\Repositories\StepRepository;
 use Lumera\Services\PublishService;
+use Lumera\Services\UploadService;
+use Lumera\Services\WebhookService;
 use Lumera\Support\Request;
 use Lumera\Support\StepType;
 use Lumera\Support\Str;
@@ -51,12 +53,33 @@ if (Request::method() === 'GET') {
     }
     unset($step);
 
+    // The builder needs the funnel list so the administrator can switch between
+    // funnels without leaving the screen.
+    $switcher = array_map(
+        static fn ($f) => [
+            'id'          => (int) $f['id'],
+            'name'        => $f['name'],
+            'slug'        => $f['slug'],
+            'status'      => $f['status'],
+            'is_archived' => $f['archived_at'] !== null,
+        ],
+        $funnels->all(true)
+    );
+
+    $uploads = new UploadService();
+
     Response::success([
         'funnel'         => $funnel,
         'steps'          => $draftSteps,
         'contact_fields' => $fields->forFunnel($funnelId, false),
         'status'         => $publish->status($funnelId),
+        'funnels'        => $switcher,
         'meta'           => [
+            'public_url'          => rtrim(\Lumera\Core\Config::appUrl(), '/') . '/' . $funnel['slug'],
+            'upload_max_mb'       => (int) ($uploads->maxBytes() / 1024 / 1024),
+            'logo_formats'        => $uploads->allowedExtensions('logo'),
+            'favicon_formats'     => $uploads->allowedExtensions('favicon'),
+            'background_formats'  => $uploads->allowedExtensions('background'),
             'step_types'          => StepType::LABELS,
             'types_with_options'  => StepType::WITH_OPTIONS,
             'auto_advance_types'  => array_values(array_filter(
@@ -89,6 +112,31 @@ if (isset($body['name'])) {
         $errors['name'] = 'A funnel name is required.';
     } else {
         $data['name'] = $name;
+    }
+}
+
+if (isset($body['company_name'])) {
+    $company = Str::clean($body['company_name'], 190);
+
+    if ($company === '') {
+        $errors['company_name'] = 'A company name is required — it is shown on the public funnel.';
+    } else {
+        $data['company_name'] = $company;
+    }
+}
+
+// The slug is the public URL, so uniqueness and reserved paths are enforced.
+if (isset($body['slug'])) {
+    $slug = Str::slug((string) $body['slug']);
+
+    if ($slug === '') {
+        $errors['slug'] = 'A URL slug is required.';
+    } elseif (in_array($slug, FunnelRepository::RESERVED_SLUGS, true)) {
+        $errors['slug'] = 'That slug is reserved by the application.';
+    } elseif ($funnels->slugExists($slug, $funnelId)) {
+        $errors['slug'] = 'Another funnel already uses that slug.';
+    } else {
+        $data['slug'] = $slug;
     }
 }
 
@@ -144,11 +192,84 @@ foreach (['primary_color', 'accent_color', 'background_color'] as $colorField) {
 foreach ([
     'submit_label_en' => 120, 'submit_label_ar' => 120,
     'success_title_en' => 190, 'success_title_ar' => 190,
+    'success_button_en' => 120, 'success_button_ar' => 120,
     'whatsapp_label_en' => 120, 'whatsapp_label_ar' => 120,
 ] as $field => $max) {
     if (isset($body[$field])) {
         $data[$field] = Str::clean($body[$field], $max);
     }
+}
+
+// ---------------------------------------------------- per-funnel delivery --
+if (array_key_exists('recipient_email', $body)) {
+    $raw = Str::clean($body['recipient_email'], 500);
+
+    if ($raw === '') {
+        // Empty means "fall back to LEAD_RECIPIENT_EMAIL from .env".
+        $data['recipient_email'] = null;
+    } else {
+        $addresses = array_filter(array_map('trim', explode(',', $raw)));
+        $invalid   = array_filter(
+            $addresses,
+            static fn ($address) => filter_var($address, FILTER_VALIDATE_EMAIL) === false
+        );
+
+        if ($addresses === [] || $invalid !== []) {
+            $errors['recipient_email'] = 'Enter one or more valid email addresses, separated by commas.';
+        } else {
+            $data['recipient_email'] = implode(',', $addresses);
+        }
+    }
+}
+
+if (array_key_exists('redirect_url', $body)) {
+    $raw = trim((string) $body['redirect_url']);
+
+    if ($raw === '') {
+        $data['redirect_url'] = null;
+    } else {
+        $url = Str::safeUrl($raw);
+
+        if ($url === null) {
+            $errors['redirect_url'] = 'Enter a valid http(s) URL, or leave it empty.';
+        } else {
+            $data['redirect_url'] = $url;
+        }
+    }
+}
+
+if (isset($body['redirect_delay'])) {
+    $data['redirect_delay'] = max(0, min(60, (int) $body['redirect_delay']));
+}
+
+$webhookEnabled = array_key_exists('webhook_enabled', $body)
+    ? AdminEndpoint::boolParam($body, 'webhook_enabled')
+    : (int) $funnel['webhook_enabled'] === 1;
+
+if (array_key_exists('webhook_url', $body)) {
+    $raw = trim((string) $body['webhook_url']);
+
+    if ($raw === '') {
+        $data['webhook_url'] = null;
+
+        if ($webhookEnabled) {
+            $errors['webhook_url'] = 'A webhook URL is required when the webhook is enabled.';
+        }
+    } else {
+        $reason = (new WebhookService())->rejectionReason($raw);
+
+        if ($reason !== null) {
+            $errors['webhook_url'] = $reason;
+        } else {
+            $data['webhook_url'] = mb_substr($raw, 0, 500);
+        }
+    }
+} elseif ($webhookEnabled && (string) ($funnel['webhook_url'] ?? '') === '') {
+    $errors['webhook_enabled'] = 'Add a webhook URL before enabling the webhook.';
+}
+
+if (array_key_exists('webhook_enabled', $body)) {
+    $data['webhook_enabled'] = $webhookEnabled ? 1 : 0;
 }
 
 foreach (['success_message_en', 'success_message_ar'] as $field) {
@@ -180,7 +301,7 @@ if (isset($body['min_completion_seconds'])) {
     $data['min_completion_seconds'] = max(0, min(600, (int) $body['min_completion_seconds']));
 }
 
-foreach (['logo_path', 'background_image_path'] as $assetField) {
+foreach (['logo_path', 'favicon_path', 'background_image_path'] as $assetField) {
     if (!array_key_exists($assetField, $body)) {
         continue;
     }

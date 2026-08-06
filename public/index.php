@@ -26,35 +26,42 @@ Response::securityHeaders(false);
 
 $funnels = new FunnelRepository();
 $slug    = Router::funnelSlug();
-$funnel  = $slug !== null ? $funnels->findBySlug($slug) : $funnels->primary();
 
-if ($funnel === null) {
-    http_response_code(404);
-    $funnel = null;
-}
+// Archived and soft-deleted funnels are invisible to the public router.
+$funnel = $slug !== null ? $funnels->findPublicBySlug($slug) : $funnels->primaryPublic();
 
 $service  = new FunnelService();
 $settings = new SettingsRepository();
 $public   = $settings->publicSettings();
 
-$languages       = $funnel !== null ? $service->languages($funnel) : ['en'];
-$defaultLanguage = $funnel !== null ? (string) $funnel['default_language'] : 'en';
+if ($funnel === null) {
+    http_response_code(404);
+
+    require dirname(__DIR__) . '/templates/public/not-found.php';
+    exit;
+}
+
+$languages       = $service->languages($funnel);
+$defaultLanguage = (string) $funnel['default_language'];
 
 $theme = [
-    'primary'    => $funnel['primary_color'] ?? '#0F2E4C',
-    'accent'     => $funnel['accent_color'] ?? '#C9A227',
-    'background' => $funnel['background_color'] ?? '#F7F8FA',
+    'primary'    => (string) $funnel['primary_color'],
+    'accent'     => (string) $funnel['accent_color'],
+    'background' => (string) $funnel['background_color'],
 ];
 
-$logo = $public['company_logo'] ?? ($funnel['logo_path'] ?? '');
+// Branding is per funnel; the global setting is only a fallback, so a single
+// installation can serve any number of companies.
+$logo = ($funnel['logo_path'] ?? '') ?: ($public['company_logo'] ?? '');
 $backgroundImage = $funnel['background_image_path'] ?? '';
 
 $view = [
     'funnel'          => $funnel,
-    'slug'            => $funnel['slug'] ?? '',
-    'name'            => $funnel['name'] ?? 'Lumera',
-    'companyName'     => $public['company_name'] ?? 'Lumera Dubai Real Estate',
+    'slug'            => (string) $funnel['slug'],
+    'name'            => (string) $funnel['name'],
+    'companyName'     => $service->companyName($funnel),
     'logo'            => $logo,
+    'favicon'         => ($funnel['favicon_path'] ?? '') ?: '',
     'backgroundImage' => $backgroundImage,
     'theme'           => $theme,
     'languages'       => $languages,
@@ -64,6 +71,9 @@ $view = [
     'preview'         => false,
 ];
 
-extract($view, EXTR_SKIP);
+// EXTR_OVERWRITE, not EXTR_SKIP: $slug already holds the *requested* slug,
+// which is null on the root URL. The template must receive the resolved
+// funnel's slug so the page always names the funnel it is rendering.
+extract($view, EXTR_OVERWRITE);
 
 require dirname(__DIR__) . '/templates/public/funnel.php';

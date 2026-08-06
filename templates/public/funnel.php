@@ -7,6 +7,7 @@
  * @var string $name
  * @var string $companyName
  * @var string $logo
+ * @var string $favicon
  * @var string $backgroundImage
  * @var array<string,string> $theme
  * @var list<string> $languages
@@ -28,11 +29,17 @@ $dir = $defaultLanguage === 'ar' ? 'rtl' : 'ltr';
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title><?= $e($name) ?> — <?= $e($companyName) ?></title>
+<?php if (($favicon ?? '') !== ''): ?>
+<link rel="icon" href="<?= $e($favicon) ?>">
+<?php else: ?>
 <link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="stylesheet" href="/assets/css/public.css?v=1">
+<?php endif; ?>
+<meta name="theme-color" content="<?= $e($theme['primary']) ?>">
+<link rel="stylesheet" href="/assets/css/public.css?v=2">
 <style>
 :root {
     --brand-primary: <?= $e($theme['primary']) ?>;
+    --brand-secondary: <?= $e($theme['accent']) ?>;
     --brand-accent: <?= $e($theme['accent']) ?>;
     --brand-background: <?= $e($theme['background']) ?>;
     <?php if ($backgroundImage !== ''): ?>
@@ -123,7 +130,11 @@ $dir = $defaultLanguage === 'ar' ? 'rtl' : 'ltr';
             </div>
             <h1 class="state__title" id="success-title"></h1>
             <p class="state__text" id="success-message"></p>
-            <a class="btn btn--whatsapp" id="whatsapp-cta" hidden rel="noopener noreferrer" target="_blank"></a>
+            <div class="state__actions">
+                <a class="btn btn--whatsapp" id="whatsapp-cta" hidden rel="noopener noreferrer" target="_blank"></a>
+                <a class="btn btn--primary btn--centered" id="success-cta" hidden></a>
+            </div>
+            <p class="state__redirect" id="redirect-note" hidden></p>
         </div>
     </section>
 

@@ -27,6 +27,7 @@ use Lumera\Repositories\FunnelRepository;
 use Lumera\Repositories\LeadRepository;
 use Lumera\Services\FunnelService;
 use Lumera\Services\LeadService;
+use Lumera\Services\WebhookService;
 use Lumera\Support\Request;
 use Lumera\Validators\SubmissionValidator;
 
@@ -90,7 +91,9 @@ $slugInput = $payload['funnel_slug'] ?? '';
 $slug      = is_string($slugInput) ? preg_replace('/[^a-z0-9\-]/', '', strtolower($slugInput)) : '';
 
 $funnels = new FunnelRepository();
-$funnel  = $slug !== '' ? $funnels->findBySlug($slug) : $funnels->primary();
+// findPublicBySlug excludes archived funnels, so an archived funnel stops
+// accepting submissions the moment it is archived.
+$funnel  = $slug !== '' ? $funnels->findPublicBySlug($slug) : $funnels->primaryPublic();
 
 if ($funnel === null || (string) $funnel['status'] !== 'active') {
     Response::error('This form is not available.', 404);
@@ -179,12 +182,14 @@ Logger::info('lead.created', [
 // ------------------------------------------------------------ notification --
 // Delivery is best-effort. The lead is already committed; a mail failure is
 // recorded on the lead for admin review and never surfaces to the visitor.
-try {
-    $leadRepo = new LeadRepository();
-    $lead     = $leadRepo->find($leadId) ?? [];
-    $lead['funnel_name'] = (string) $funnel['name'];
+$leadRepo = new LeadRepository();
+$lead     = $leadRepo->find($leadId) ?? [];
+$answers  = $leadRepo->answers($leadId);
 
-    $result = (new LeadNotification())->send($lead, $leadRepo->answers($leadId));
+$lead['funnel_name'] = (string) $funnel['name'];
+
+try {
+    $result = (new LeadNotification())->send($lead, $answers, $funnel);
 
     if ($result['ok']) {
         $leadService->markEmailSent($leadId);
@@ -194,8 +199,23 @@ try {
         $leadService->markEmailFailed($leadId, (string) ($result['error'] ?? 'unknown error'));
     }
 } catch (Throwable $e) {
-    (new LeadService())->markEmailFailed($leadId, 'Notification exception.');
+    $leadService->markEmailFailed($leadId, 'Notification exception.');
     Logger::error('submit.notification_exception', ['lead_id' => $leadId, 'message' => $e->getMessage()]);
+}
+
+// ---------------------------------------------------------------- webhook --
+// Same contract as email: the lead is already stored, so a webhook failure is
+// logged for the administrator and never reaches the visitor.
+if ((int) ($funnel['webhook_enabled'] ?? 0) === 1 && (string) ($funnel['webhook_url'] ?? '') !== '') {
+    try {
+        $webhook = new WebhookService();
+        $webhook->send(
+            (string) $funnel['webhook_url'],
+            $webhook->buildPayload($funnel, $lead, $answers)
+        );
+    } catch (Throwable $e) {
+        Logger::error('submit.webhook_exception', ['lead_id' => $leadId, 'message' => $e->getMessage()]);
+    }
 }
 
 Response::success([
@@ -212,11 +232,16 @@ Response::success([
  */
 function publicSuccessBlock(array $snapshot, string $language, FunnelService $service): array
 {
-    $labels = $snapshot['funnel']['labels'] ?? [];
+    $labels   = $snapshot['funnel']['labels'] ?? [];
+    $redirect = $snapshot['funnel']['redirect'] ?? [];
 
     return [
         'title'    => $labels['success_title'][$language] ?? $labels['success_title']['en'] ?? 'Thank you',
         'message'  => $labels['success_message'][$language] ?? $labels['success_message']['en'] ?? '',
+        'button'   => $labels['success_button'][$language] ?? $labels['success_button']['en'] ?? '',
         'whatsapp' => $service->whatsappConfig($snapshot),
+        'redirect' => ($redirect['url'] ?? null) !== null
+            ? ['url' => $redirect['url'], 'delay' => (int) ($redirect['delay'] ?? 5)]
+            : null,
     ];
 }
