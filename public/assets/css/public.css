@@ -1,0 +1,521 @@
+/* ==========================================================================
+   Lumera — public funnel
+   Fully theme-driven: brand colours arrive as CSS custom properties written
+   by the server from the published funnel configuration.
+   ========================================================================== */
+
+:root {
+    --brand-primary: #0F2E4C;
+    --brand-accent: #C9A227;
+    --brand-background: #F7F8FA;
+
+    --ink: #16212c;
+    --ink-soft: #5b6875;
+    --ink-faint: #8c98a4;
+    --line: #e2e6ea;
+    --surface: #ffffff;
+    --danger: #c0392b;
+    --whatsapp: #25D366;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 18px;
+
+    --shadow-sm: 0 1px 2px rgba(16, 32, 48, .06);
+    --shadow-md: 0 6px 24px rgba(16, 32, 48, .08);
+    --shadow-lg: 0 18px 48px rgba(16, 32, 48, .12);
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
+
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Arabic", sans-serif;
+    --transition: 180ms cubic-bezier(.2, .7, .3, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+    margin: 0;
+    font-family: var(--font);
+    color: var(--ink);
+    background-color: var(--brand-background);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.55;
+}
+
+body.has-bg-image {
+    background-image: var(--brand-background-image);
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+}
+
+body.has-bg-image::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(247, 248, 250, .88);
+    z-index: 0;
+}
+
+img { max-width: 100%; height: auto; }
+
+button { font: inherit; }
+
+/* ------------------------------------------------------------ preview bar */
+.preview-banner {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: 9px var(--space-4);
+    background: #1c2733;
+    color: #fff;
+    font-size: 13px;
+    letter-spacing: .2px;
+}
+
+.preview-banner__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--brand-accent);
+}
+
+/* --------------------------------------------------------------- layout */
+.funnel {
+    position: relative;
+    z-index: 1;
+    max-width: 680px;
+    margin: 0 auto;
+    padding: var(--space-5) var(--space-4) var(--space-6);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.funnel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    margin-bottom: var(--space-5);
+}
+
+.funnel__logo { max-height: 42px; width: auto; }
+
+.funnel__wordmark {
+    font-weight: 600;
+    font-size: 17px;
+    letter-spacing: .3px;
+    color: var(--brand-primary);
+}
+
+/* ------------------------------------------------------ language switch */
+.lang-switch {
+    display: inline-flex;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px;
+    box-shadow: var(--shadow-sm);
+}
+
+.lang-switch__btn {
+    border: 0;
+    background: transparent;
+    color: var(--ink-soft);
+    padding: 5px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+}
+
+.lang-switch__btn[aria-pressed="true"] {
+    background: var(--brand-primary);
+    color: #fff;
+}
+
+/* -------------------------------------------------------------- progress */
+.funnel__progress { margin-bottom: var(--space-5); }
+
+.progress-bar {
+    height: 5px;
+    background: rgba(15, 46, 76, .1);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.progress-bar__fill {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--brand-primary), var(--brand-accent));
+    border-radius: 999px;
+    transition: width 320ms cubic-bezier(.2, .7, .3, 1);
+}
+
+.funnel__counter {
+    margin: var(--space-2) 0 0;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    letter-spacing: .3px;
+}
+
+/* ----------------------------------------------------------------- stage */
+.funnel__stage {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    padding: var(--space-6) var(--space-5);
+}
+
+@media (min-width: 600px) {
+    .funnel__stage { padding: var(--space-7) var(--space-6); }
+}
+
+/* ----------------------------------------------------------------- steps */
+.step__title {
+    margin: 0 0 var(--space-2);
+    font-size: 22px;
+    line-height: 1.3;
+    font-weight: 650;
+    color: var(--brand-primary);
+    letter-spacing: -.2px;
+}
+
+@media (min-width: 600px) {
+    .step__title { font-size: 26px; }
+}
+
+.step__description {
+    margin: 0 0 var(--space-5);
+    color: var(--ink-soft);
+    font-size: 15px;
+}
+
+.step__required-hint {
+    display: inline-block;
+    margin-inline-start: 6px;
+    color: var(--brand-accent);
+    font-size: 15px;
+}
+
+/* --------------------------------------------------------------- options */
+.options {
+    display: grid;
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+}
+
+@media (min-width: 560px) {
+    .options--grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    text-align: start;
+    padding: var(--space-4);
+    background: var(--surface);
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: border-color var(--transition), box-shadow var(--transition), background var(--transition), transform var(--transition);
+}
+
+.option:hover {
+    border-color: var(--brand-primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.option:active { transform: scale(.995); }
+
+.option[aria-pressed="true"],
+.option.is-selected {
+    border-color: var(--brand-primary);
+    background: rgba(15, 46, 76, .04);
+    box-shadow: 0 0 0 3px rgba(15, 46, 76, .09);
+}
+
+.option__marker {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    border: 1.5px solid var(--line);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    transition: border-color var(--transition), background var(--transition);
+}
+
+.options--multi .option__marker { border-radius: 6px; }
+
+.option.is-selected .option__marker,
+.option[aria-pressed="true"] .option__marker {
+    border-color: var(--brand-primary);
+    background: var(--brand-primary);
+}
+
+.option__marker::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fff;
+    opacity: 0;
+    transition: opacity var(--transition);
+}
+
+.options--multi .option__marker::after { border-radius: 2px; }
+
+.option.is-selected .option__marker::after,
+.option[aria-pressed="true"] .option__marker::after { opacity: 1; }
+
+.option__label {
+    font-size: 15.5px;
+    font-weight: 550;
+    color: var(--ink);
+}
+
+.option__icon {
+    font-size: 19px;
+    line-height: 1;
+}
+
+/* ---------------------------------------------------------------- fields */
+.field { margin-top: var(--space-4); }
+
+.field__label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink-soft);
+}
+
+.field__required { color: var(--brand-accent); }
+
+.field__control,
+.field select,
+.field input {
+    width: 100%;
+    padding: 12px 14px;
+    font: inherit;
+    font-size: 15px;
+    color: var(--ink);
+    background: #fff;
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius-sm);
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.field__control:focus,
+.field select:focus,
+.field input:focus {
+    outline: none;
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 3px rgba(15, 46, 76, .1);
+}
+
+.field__control[aria-invalid="true"] { border-color: var(--danger); }
+
+.field__error {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--danger);
+}
+
+.field-row {
+    display: grid;
+    gap: var(--space-3);
+    grid-template-columns: 110px 1fr;
+    align-items: end;
+}
+
+[dir="rtl"] .field-row { grid-template-columns: 110px 1fr; }
+
+/* --------------------------------------------------------------- consent */
+.consent {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    margin-top: var(--space-4);
+    transition: border-color var(--transition), background var(--transition);
+}
+
+.consent.is-selected {
+    border-color: var(--brand-primary);
+    background: rgba(15, 46, 76, .04);
+}
+
+.consent input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 2px; accent-color: var(--brand-primary); }
+
+.consent__text { font-size: 14.5px; color: var(--ink); }
+
+/* ----------------------------------------------------------- information */
+.information-body {
+    margin-top: var(--space-4);
+    font-size: 15.5px;
+    color: var(--ink-soft);
+    white-space: pre-line;
+}
+
+/* --------------------------------------------------------------- actions */
+.step__actions {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+    align-items: center;
+}
+
+.step__error {
+    margin: var(--space-4) 0 0;
+    padding: 10px 14px;
+    background: rgba(192, 57, 43, .07);
+    border: 1px solid rgba(192, 57, 43, .25);
+    border-radius: var(--radius-sm);
+    color: var(--danger);
+    font-size: 14px;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: 13px 26px;
+    border: 1.5px solid transparent;
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--transition), color var(--transition), border-color var(--transition), opacity var(--transition);
+}
+
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.btn--primary {
+    background: var(--brand-primary);
+    color: #fff;
+    margin-inline-start: auto;
+    min-width: 140px;
+}
+
+.btn--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--brand-primary) 88%, #000); }
+
+.btn--ghost {
+    background: transparent;
+    color: var(--ink-soft);
+    border-color: var(--line);
+}
+
+.btn--ghost:hover { border-color: var(--ink-faint); color: var(--ink); }
+
+.btn--whatsapp {
+    background: var(--whatsapp);
+    color: #fff;
+    margin-top: var(--space-5);
+}
+
+/* ---------------------------------------------------------------- states */
+.state { text-align: center; padding: var(--space-6) 0; }
+
+.state--loading { color: var(--ink-faint); }
+
+.state__title {
+    margin: 0 0 var(--space-3);
+    font-size: 24px;
+    font-weight: 650;
+    color: var(--brand-primary);
+}
+
+.state__text {
+    margin: 0 auto;
+    max-width: 440px;
+    color: var(--ink-soft);
+    font-size: 15.5px;
+}
+
+.state__check { color: var(--brand-accent); margin-bottom: var(--space-4); }
+
+.spinner {
+    display: inline-block;
+    width: 26px;
+    height: 26px;
+    border: 2.5px solid rgba(15, 46, 76, .15);
+    border-top-color: var(--brand-primary);
+    border-radius: 50%;
+    animation: spin 700ms linear infinite;
+    margin-bottom: var(--space-3);
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.state--error .state__title { color: var(--danger); }
+.state--error .btn { margin-top: var(--space-5); }
+
+/* -------------------------------------------------------------- honeypot */
+.hp-field {
+    position: absolute !important;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- footer */
+.funnel__footer {
+    margin-top: var(--space-5);
+    text-align: center;
+}
+
+.funnel__legal {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+}
+
+.funnel__legal a {
+    color: var(--ink-soft);
+    margin-inline-start: var(--space-3);
+}
+
+/* ------------------------------------------------------------ transitions */
+.step { animation: step-in 260ms cubic-bezier(.2, .7, .3, 1); }
+
+@keyframes step-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        transition-duration: .01ms !important;
+    }
+}
+
+/* -------------------------------------------------------------------- RTL */
+[dir="rtl"] .option { text-align: right; }
+[dir="rtl"] .funnel__legal a { margin-inline-start: var(--space-3); }

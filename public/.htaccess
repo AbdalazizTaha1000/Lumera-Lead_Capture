@@ -1,0 +1,125 @@
+# ==========================================================================
+# Lumera Lead Capture — public web root
+# DocumentRoot must point at this directory. Everything above it (src/,
+# storage/, database/, templates/, vendor/, .env) then stays unreachable.
+# ==========================================================================
+
+# --------------------------------------------------------------- basics ---
+Options -Indexes -MultiViews +FollowSymLinks
+DirectoryIndex index.php index.html
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # --- HTTPS redirect -------------------------------------------------
+    # Enabled only when the request is genuinely plain HTTP. The
+    # X-Forwarded-Proto check keeps this safe behind a proxy or load balancer.
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+    RewriteCond %{HTTP_HOST} !^localhost [NC]
+    RewriteCond %{HTTP_HOST} !^127\.0\.0\.1 [NC]
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+    # --- real files and directories are served as-is --------------------
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # --- API and admin keep their own paths -----------------------------
+    RewriteRule ^api/ - [L]
+    RewriteRule ^admin/ - [L]
+
+    # --- everything else renders the public funnel ----------------------
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+# ------------------------------------------------------- hidden files ---
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ------------------------------------------- sensitive file extensions ---
+<FilesMatch "\.(env|ini|log|sh|sql|bak|old|orig|swp|yml|yaml|lock|json|md|dist|conf|config)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# composer.json / composer.lock live above the web root, but deny by name too.
+<FilesMatch "^(composer\.(json|lock)|package(-lock)?\.json|README\.md|LICENSE)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+</FilesMatch>
+
+# ----------------------------------------------------- security headers ---
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    Header always set Cross-Origin-Opener-Policy "same-origin"
+    Header always unset X-Powered-By
+    Header unset X-Powered-By
+
+    # HSTS — only meaningful once a valid certificate is installed.
+    <If "%{HTTPS} == 'on'">
+        Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    </If>
+</IfModule>
+
+# ------------------------------------------------------------- caching ---
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css                "access plus 1 year"
+    ExpiresByType application/javascript  "access plus 1 year"
+    ExpiresByType image/png               "access plus 6 months"
+    ExpiresByType image/jpeg              "access plus 6 months"
+    ExpiresByType image/webp              "access plus 6 months"
+    ExpiresByType image/svg+xml           "access plus 6 months"
+    ExpiresByType image/x-icon            "access plus 1 year"
+    ExpiresByType font/woff2              "access plus 1 year"
+</IfModule>
+
+<IfModule mod_headers.c>
+    # Static assets: long-lived, cache-busted by the ?v= query string.
+    <FilesMatch "\.(css|js|png|jpe?g|webp|svg|ico|woff2?)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+
+    # PHP endpoints (API + admin HTML) must never be cached.
+    <FilesMatch "\.php$">
+        Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+        Header set Pragma "no-cache"
+    </FilesMatch>
+</IfModule>
+
+# --------------------------------------------------------- compression ---
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/css text/xml
+    AddOutputFilterByType DEFLATE application/javascript application/json
+    AddOutputFilterByType DEFLATE application/xml image/svg+xml
+</IfModule>
+
+# ------------------------------------------------------------- uploads ---
+# Defence in depth: assets/uploads has its own .htaccess as well.
+<IfModule mod_rewrite.c>
+    RewriteRule ^assets/uploads/.*\.(php[0-9]?|phtml|phar|pl|py|cgi|s?html?)$ - [F,L]
+</IfModule>
+
+# ------------------------------------------------------------ php ini ---
+<IfModule mod_php.c>
+    php_flag display_errors off
+    php_flag expose_php off
+</IfModule>

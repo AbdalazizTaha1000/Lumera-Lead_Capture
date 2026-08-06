@@ -1,0 +1,31 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+/vendor/
+
+# Runtime storage
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/cache/*
+!/storage/cache/.gitkeep
+/storage/rate-limit/*
+!/storage/rate-limit/.gitkeep
+
+# Uploads (user generated)
+/public/assets/uploads/*
+!/public/assets/uploads/.htaccess
+!/public/assets/uploads/.gitkeep
+
+# Installer lock
+/storage/installed.lock
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.log

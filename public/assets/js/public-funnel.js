@@ -1,0 +1,1012 @@
+/* =========================================================================
+ * Lumera — public funnel renderer
+ *
+ * Everything rendered here comes from the published configuration returned by
+ * /api/public/funnel.php. There are no hardcoded steps, titles, options,
+ * option counts, required flags, languages or progress percentages.
+ *
+ * The same file drives the admin preview (?preview=1), so the preview and the
+ * live funnel can never drift apart.
+ * ========================================================================= */
+(function () {
+    'use strict';
+
+    var root = document.getElementById('funnel-root');
+    if (!root) { return; }
+
+    /* ---------------------------------------------------------------- i18n */
+    /* Interface chrome only. All funnel content is server-driven. */
+    var UI = {
+        en: {
+            loading: 'Loading…',
+            error_title: 'We could not load this form',
+            error_text: 'Please refresh the page and try again.',
+            retry: 'Try again',
+            next: 'Next',
+            back: 'Back',
+            submit: 'Submit',
+            submitting: 'Sending…',
+            privacy: 'Privacy Policy',
+            step_counter: 'Step {current} of {total}',
+            required: 'This field is required.',
+            select_required: 'Please make a selection.',
+            consent_required: 'Please confirm to continue.',
+            invalid_email: 'Please enter a valid email address.',
+            invalid_phone: 'Please enter a valid phone number.',
+            invalid_number: 'Please enter a valid number.',
+            min_length: 'Please enter at least {n} characters.',
+            max_length: 'Please enter no more than {n} characters.',
+            min_value: 'The value must be at least {n}.',
+            max_value: 'The value must be at most {n}.',
+            pattern: 'Please check the format of your answer.',
+            generic_error: 'Something went wrong. Please try again.',
+            select_placeholder: 'Please choose…',
+            preview_note: 'Preview mode — submissions are disabled.'
+        },
+        ar: {
+            loading: 'جارٍ التحميل…',
+            error_title: 'تعذّر تحميل النموذج',
+            error_text: 'يرجى تحديث الصفحة والمحاولة مرة أخرى.',
+            retry: 'إعادة المحاولة',
+            next: 'التالي',
+            back: 'رجوع',
+            submit: 'إرسال',
+            submitting: 'جارٍ الإرسال…',
+            privacy: 'سياسة الخصوصية',
+            step_counter: 'الخطوة {current} من {total}',
+            required: 'هذا الحقل مطلوب.',
+            select_required: 'يرجى الاختيار.',
+            consent_required: 'يرجى الموافقة للمتابعة.',
+            invalid_email: 'يرجى إدخال بريد إلكتروني صحيح.',
+            invalid_phone: 'يرجى إدخال رقم هاتف صحيح.',
+            invalid_number: 'يرجى إدخال رقم صحيح.',
+            min_length: 'يرجى إدخال {n} أحرف على الأقل.',
+            max_length: 'يرجى إدخال {n} حرفاً كحد أقصى.',
+            min_value: 'يجب ألا تقل القيمة عن {n}.',
+            max_value: 'يجب ألا تزيد القيمة عن {n}.',
+            pattern: 'يرجى التحقق من صيغة الإجابة.',
+            generic_error: 'حدث خطأ ما. يرجى المحاولة مرة أخرى.',
+            select_placeholder: 'يرجى الاختيار…',
+            preview_note: 'وضع المعاينة — الإرسال معطّل.'
+        }
+    };
+
+    var COUNTRY_CODES = ['+971', '+966', '+974', '+973', '+965', '+968', '+20', '+44', '+91', '+92', '+1', '+33', '+49', '+7', '+86', '+90', '+234', '+27'];
+
+    /* --------------------------------------------------------------- state */
+    var state = {
+        slug: root.dataset.slug || '',
+        preview: root.dataset.preview === '1',
+        lang: root.dataset.defaultLanguage || 'en',
+        languages: (root.dataset.languages || 'en').split(',').filter(Boolean),
+        csrf: root.dataset.csrf || '',
+        submissionToken: root.dataset.submissionToken || '',
+        config: null,
+        steps: [],
+        index: 0,
+        answers: {},
+        submitting: false,
+        startedAt: Date.now()
+    };
+
+    var el = {
+        stage: document.getElementById('funnel-stage'),
+        loading: document.getElementById('state-loading'),
+        error: document.getElementById('state-error'),
+        errorText: document.getElementById('error-text'),
+        retry: document.getElementById('retry-button'),
+        form: document.getElementById('step-form'),
+        container: document.getElementById('step-container'),
+        stepError: document.getElementById('step-error'),
+        back: document.getElementById('back-button'),
+        next: document.getElementById('next-button'),
+        progress: document.getElementById('funnel-progress'),
+        progressFill: document.getElementById('progress-fill'),
+        counter: document.getElementById('funnel-counter'),
+        success: document.getElementById('state-success'),
+        successTitle: document.getElementById('success-title'),
+        successMessage: document.getElementById('success-message'),
+        whatsapp: document.getElementById('whatsapp-cta'),
+        privacy: document.getElementById('privacy-link'),
+        honeypot: document.getElementById('company_website')
+    };
+
+    /* ------------------------------------------------------------- helpers */
+    function t(key, replacements) {
+        var pack = UI[state.lang] || UI.en;
+        var value = pack[key] || UI.en[key] || key;
+
+        if (replacements) {
+            Object.keys(replacements).forEach(function (token) {
+                value = value.replace('{' + token + '}', replacements[token]);
+            });
+        }
+
+        return value;
+    }
+
+    /** Picks the active-language string with an English fallback. */
+    function localized(bundle) {
+        if (!bundle) { return ''; }
+        if (typeof bundle === 'string') { return bundle; }
+
+        return bundle[state.lang] || bundle.en || '';
+    }
+
+    function storageKey(suffix) {
+        return 'lumera_funnel_' + (state.slug || 'default') + '_' + suffix;
+    }
+
+    function sessionRead(key, fallback) {
+        try {
+            var raw = window.sessionStorage.getItem(key);
+            return raw ? JSON.parse(raw) : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function sessionWrite(key, value) {
+        try {
+            window.sessionStorage.setItem(key, JSON.stringify(value));
+        } catch (e) { /* private mode / quota — non fatal */ }
+    }
+
+    function sessionRemove(key) {
+        try { window.sessionStorage.removeItem(key); } catch (e) { /* ignore */ }
+    }
+
+    function clear(node) {
+        while (node.firstChild) { node.removeChild(node.firstChild); }
+    }
+
+    function element(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) { node.className = className; }
+        if (text !== undefined && text !== null) { node.textContent = text; }
+        return node;
+    }
+
+    /* ---------------------------------------------------------- attribution */
+    var ATTRIBUTION_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'];
+
+    function captureAttribution() {
+        var stored = sessionRead('lumera_attribution', {}) || {};
+        var params = new URLSearchParams(window.location.search);
+        var changed = false;
+
+        ATTRIBUTION_KEYS.forEach(function (key) {
+            var value = params.get(key);
+            if (value && !stored[key]) {
+                stored[key] = value.slice(0, 190);
+                changed = true;
+            }
+        });
+
+        if (!stored.landing_page) {
+            stored.landing_page = window.location.href.slice(0, 500);
+            changed = true;
+        }
+
+        if (!stored.referrer && document.referrer) {
+            stored.referrer = document.referrer.slice(0, 500);
+            changed = true;
+        }
+
+        // Persisted in sessionStorage so a language switch or a page reload
+        // during the funnel keeps the original attribution intact.
+        if (changed) { sessionWrite('lumera_attribution', stored); }
+
+        return stored;
+    }
+
+    /* ------------------------------------------------------ step visibility */
+    /**
+     * Applies the optional conditional-logic rule of each step.
+     * Steps without a condition are always visible.
+     */
+    function visibleSteps() {
+        var visible = [];
+
+        state.steps.forEach(function (step) {
+            if (!step.condition || !step.condition.parent_key || !step.condition.operator) {
+                visible.push(step);
+                return;
+            }
+
+            var parentAnswer = state.answers[step.condition.parent_key];
+            var expected = String(step.condition.value === undefined ? '' : step.condition.value);
+            var actual = Array.isArray(parentAnswer) ? parentAnswer : [parentAnswer];
+            var matches;
+
+            switch (step.condition.operator) {
+                case 'equals':
+                    matches = actual.some(function (v) { return String(v) === expected; });
+                    break;
+                case 'not_equals':
+                    matches = !actual.some(function (v) { return String(v) === expected; });
+                    break;
+                case 'contains':
+                    matches = actual.some(function (v) { return String(v).indexOf(expected) !== -1; });
+                    break;
+                default:
+                    matches = true;
+            }
+
+            if (matches) { visible.push(step); }
+        });
+
+        return visible;
+    }
+
+    /* ------------------------------------------------------------ rendering */
+    function showOnly(target) {
+        [el.loading, el.error, el.form, el.success].forEach(function (node) {
+            if (node) { node.hidden = node !== target; }
+        });
+    }
+
+    function applyDirection() {
+        var rtl = state.lang === 'ar';
+        document.documentElement.lang = state.lang;
+        document.documentElement.dir = rtl ? 'rtl' : 'ltr';
+
+        document.querySelectorAll('[data-i18n]').forEach(function (node) {
+            var key = node.getAttribute('data-i18n');
+            if (UI[state.lang] && UI[state.lang][key]) { node.textContent = UI[state.lang][key]; }
+        });
+
+        document.querySelectorAll('.lang-switch__btn').forEach(function (btn) {
+            btn.setAttribute('aria-pressed', btn.dataset.language === state.lang ? 'true' : 'false');
+        });
+    }
+
+    function updateProgress(steps) {
+        var ui = (state.config && state.config.funnel && state.config.funnel.ui) || {};
+
+        if (!ui.progress_bar && !ui.step_counter) {
+            el.progress.hidden = true;
+            return;
+        }
+
+        el.progress.hidden = false;
+
+        var total = steps.length;
+        var current = Math.min(state.index + 1, total);
+        // Progress is always derived from the live step count.
+        var percent = total > 0 ? Math.round((current / total) * 100) : 0;
+
+        if (ui.progress_bar) {
+            el.progressFill.parentElement.hidden = false;
+            el.progressFill.style.width = percent + '%';
+            el.progressFill.parentElement.setAttribute('aria-valuenow', String(percent));
+        } else {
+            el.progressFill.parentElement.hidden = true;
+        }
+
+        el.counter.textContent = ui.step_counter
+            ? t('step_counter', { current: current, total: total })
+            : '';
+    }
+
+    function render() {
+        var steps = visibleSteps();
+
+        if (steps.length === 0) {
+            showError(t('error_text'));
+            return;
+        }
+
+        if (state.index >= steps.length) { state.index = steps.length - 1; }
+        if (state.index < 0) { state.index = 0; }
+
+        var step = steps[state.index];
+
+        showOnly(el.form);
+        clear(el.container);
+        hideStepError();
+
+        var heading = element('h1', 'step__title', localized(step.title));
+
+        if (step.required) {
+            heading.appendChild(element('span', 'step__required-hint', '*'));
+        }
+
+        el.container.appendChild(heading);
+
+        var description = localized(step.description);
+
+        if (description) {
+            el.container.appendChild(element('p', 'step__description', description));
+        }
+
+        renderBody(step);
+
+        var ui = (state.config.funnel && state.config.funnel.ui) || {};
+        el.back.hidden = !(ui.back_button !== false && state.index > 0);
+        el.back.textContent = t('back');
+
+        var isLast = state.index === steps.length - 1;
+        el.next.disabled = false;
+        el.next.textContent = isLast
+            ? (localized((state.config.funnel.labels || {}).submit) || t('submit'))
+            : t('next');
+
+        updateProgress(steps);
+
+        var focusable = el.container.querySelector('input, select, textarea, button');
+        if (focusable && window.innerWidth > 700) { focusable.focus(); }
+    }
+
+    function renderBody(step) {
+        switch (step.type) {
+            case 'single_select':
+                renderOptions(step, false);
+                break;
+            case 'multi_select':
+                renderOptions(step, true);
+                break;
+            case 'dropdown':
+                renderDropdown(step);
+                break;
+            case 'contact_information':
+                renderContact(step);
+                break;
+            case 'consent':
+                renderConsent(step);
+                break;
+            case 'information':
+                renderInformation(step);
+                break;
+            case 'email':
+                renderInput(step, 'email');
+                break;
+            case 'phone':
+                renderInput(step, 'tel');
+                break;
+            case 'number':
+                renderInput(step, 'number');
+                break;
+            default:
+                renderInput(step, 'text');
+        }
+    }
+
+    function renderOptions(step, multi) {
+        var options = step.options || [];
+        var wrap = element('div', 'options' + (multi ? ' options--multi' : '') + (options.length > 3 ? ' options--grid' : ''));
+        var current = state.answers[step.key];
+
+        options.forEach(function (option) {
+            var selected = multi
+                ? Array.isArray(current) && current.indexOf(option.value) !== -1
+                : current === option.value;
+
+            var button = element('button', 'option' + (selected ? ' is-selected' : ''));
+            button.type = 'button';
+            button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+            button.dataset.value = option.value;
+
+            button.appendChild(element('span', 'option__marker'));
+
+            if (option.icon) {
+                button.appendChild(element('span', 'option__icon', option.icon));
+            }
+
+            button.appendChild(element('span', 'option__label', localized(option.label)));
+
+            button.addEventListener('click', function () {
+                if (multi) {
+                    var list = Array.isArray(state.answers[step.key]) ? state.answers[step.key].slice() : [];
+                    var at = list.indexOf(option.value);
+
+                    if (at === -1) { list.push(option.value); } else { list.splice(at, 1); }
+
+                    state.answers[step.key] = list;
+                    persistAnswers();
+                    render();
+                    return;
+                }
+
+                state.answers[step.key] = option.value;
+                persistAnswers();
+                hideStepError();
+
+                wrap.querySelectorAll('.option').forEach(function (node) {
+                    var isMe = node === button;
+                    node.classList.toggle('is-selected', isMe);
+                    node.setAttribute('aria-pressed', isMe ? 'true' : 'false');
+                });
+
+                if (step.auto_advance) {
+                    window.setTimeout(goNext, 220);
+                }
+            });
+
+            wrap.appendChild(button);
+        });
+
+        el.container.appendChild(wrap);
+    }
+
+    function renderDropdown(step) {
+        var field = element('div', 'field');
+        var select = document.createElement('select');
+        select.className = 'field__control';
+        select.id = 'field-' + step.key;
+
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = localized(step.placeholder) || t('select_placeholder');
+        select.appendChild(placeholder);
+
+        (step.options || []).forEach(function (option) {
+            var node = document.createElement('option');
+            node.value = option.value;
+            node.textContent = localized(option.label);
+            if (state.answers[step.key] === option.value) { node.selected = true; }
+            select.appendChild(node);
+        });
+
+        select.addEventListener('change', function () {
+            state.answers[step.key] = select.value;
+            persistAnswers();
+            hideStepError();
+            if (step.auto_advance && select.value) { window.setTimeout(goNext, 180); }
+        });
+
+        field.appendChild(select);
+        el.container.appendChild(field);
+    }
+
+    function renderInput(step, inputType) {
+        var field = element('div', 'field');
+        var input = document.createElement('input');
+
+        input.type = inputType;
+        input.className = 'field__control';
+        input.id = 'field-' + step.key;
+        input.placeholder = localized(step.placeholder);
+        input.value = state.answers[step.key] === undefined ? '' : state.answers[step.key];
+        input.autocomplete = inputType === 'email' ? 'email' : (inputType === 'tel' ? 'tel' : 'off');
+
+        var v = step.validation || {};
+        if (v.max_length) { input.maxLength = v.max_length; }
+        if (inputType === 'number') {
+            if (v.min_value !== null && v.min_value !== undefined) { input.min = v.min_value; }
+            if (v.max_value !== null && v.max_value !== undefined) { input.max = v.max_value; }
+        }
+
+        input.addEventListener('input', function () {
+            state.answers[step.key] = input.value;
+            persistAnswers();
+            hideStepError();
+        });
+
+        field.appendChild(input);
+        el.container.appendChild(field);
+    }
+
+    function renderConsent(step) {
+        var label = element('label', 'consent' + (state.answers[step.key] ? ' is-selected' : ''));
+        var input = document.createElement('input');
+
+        input.type = 'checkbox';
+        input.checked = state.answers[step.key] === true;
+        input.id = 'field-' + step.key;
+
+        input.addEventListener('change', function () {
+            state.answers[step.key] = input.checked;
+            label.classList.toggle('is-selected', input.checked);
+            persistAnswers();
+            hideStepError();
+        });
+
+        label.appendChild(input);
+        // The consent wording itself is the step title, so use the description
+        // when present and fall back to the title.
+        label.appendChild(element('span', 'consent__text', localized(step.description) || localized(step.title)));
+
+        el.container.appendChild(label);
+    }
+
+    function renderInformation(step) {
+        var body = localized(step.description);
+
+        if (body) {
+            el.container.appendChild(element('div', 'information-body', body));
+        }
+    }
+
+    function renderContact(step) {
+        var fields = step.fields || [];
+        var values = state.answers[step.key] || {};
+        var wrap = element('div', 'contact-fields');
+
+        // Country code + phone share a row when both are active.
+        var hasCountry = fields.some(function (f) { return f.key === 'country_code'; });
+        var pendingRow = null;
+
+        fields.forEach(function (field) {
+            var node = buildContactField(step, field, values);
+
+            if (hasCountry && field.key === 'country_code') {
+                pendingRow = element('div', 'field-row');
+                pendingRow.appendChild(node);
+                wrap.appendChild(pendingRow);
+                return;
+            }
+
+            if (pendingRow && field.key === 'phone') {
+                pendingRow.appendChild(node);
+                pendingRow = null;
+                return;
+            }
+
+            pendingRow = null;
+            wrap.appendChild(node);
+        });
+
+        el.container.appendChild(wrap);
+    }
+
+    function buildContactField(step, field, values) {
+        var wrapper = element('div', 'field');
+        var id = 'contact-' + field.key;
+
+        var label = element('label', 'field__label', localized(field.label));
+        label.htmlFor = id;
+
+        if (field.required) {
+            label.appendChild(element('span', 'field__required', ' *'));
+        }
+
+        wrapper.appendChild(label);
+
+        var control;
+
+        if (field.type === 'select') {
+            control = document.createElement('select');
+            control.appendChild(new Option(t('select_placeholder'), ''));
+
+            (field.choices || []).forEach(function (choice) {
+                var option = new Option(
+                    state.lang === 'ar' ? (choice.label_ar || choice.label_en) : choice.label_en,
+                    choice.value
+                );
+                control.appendChild(option);
+            });
+        } else if (field.key === 'country_code') {
+            control = document.createElement('select');
+            var codes = COUNTRY_CODES.slice();
+            var existing = values[field.key];
+
+            if (existing && codes.indexOf(existing) === -1) { codes.unshift(existing); }
+
+            codes.forEach(function (code) { control.appendChild(new Option(code, code)); });
+
+            if (!values[field.key]) {
+                values[field.key] = codes[0];
+                state.answers[step.key] = values;
+            }
+        } else {
+            control = document.createElement('input');
+            control.type = field.type === 'email' ? 'email' : (field.type === 'tel' ? 'tel' : 'text');
+            control.placeholder = localized(field.placeholder);
+            control.autocomplete = field.key === 'full_name' ? 'name'
+                : (field.key === 'email' ? 'email' : (field.key === 'phone' ? 'tel' : 'off'));
+
+            if (field.max_length) { control.maxLength = field.max_length; }
+        }
+
+        control.className = 'field__control';
+        control.id = id;
+        control.dataset.fieldKey = field.key;
+
+        if (values[field.key] !== undefined && values[field.key] !== null) {
+            control.value = values[field.key];
+        }
+
+        control.addEventListener('input', function () { storeContact(step, field.key, control.value); });
+        control.addEventListener('change', function () { storeContact(step, field.key, control.value); });
+
+        wrapper.appendChild(control);
+        wrapper.appendChild(element('p', 'field__error', ''));
+
+        return wrapper;
+    }
+
+    function storeContact(step, key, value) {
+        var current = state.answers[step.key] || {};
+        current[key] = value;
+        state.answers[step.key] = current;
+        persistAnswers();
+        hideStepError();
+    }
+
+    /* ----------------------------------------------------------- validation */
+    /** Mirrors the server rules; the server remains authoritative. */
+    function validateStep(step) {
+        clearFieldErrors();
+
+        var value = state.answers[step.key];
+        var v = step.validation || {};
+        var custom = localized(v.message);
+
+        if (step.type === 'information') { return null; }
+
+        if (step.type === 'consent') {
+            return (step.required && value !== true) ? (custom || t('consent_required')) : null;
+        }
+
+        if (step.type === 'single_select' || step.type === 'dropdown') {
+            return (step.required && !value) ? (custom || t('select_required')) : null;
+        }
+
+        if (step.type === 'multi_select') {
+            return (step.required && (!Array.isArray(value) || value.length === 0))
+                ? (custom || t('select_required')) : null;
+        }
+
+        if (step.type === 'contact_information') {
+            return validateContact(step);
+        }
+
+        var text = (value === undefined || value === null) ? '' : String(value).trim();
+
+        if (text === '') { return step.required ? (custom || t('required')) : null; }
+
+        if (step.type === 'email' && !isEmail(text)) { return custom || t('invalid_email'); }
+        if (step.type === 'phone' && !/^[0-9+\-\s().]{6,20}$/.test(text)) { return custom || t('invalid_phone'); }
+
+        if (step.type === 'number') {
+            if (isNaN(Number(text))) { return custom || t('invalid_number'); }
+            if (v.min_value !== null && v.min_value !== undefined && Number(text) < v.min_value) {
+                return custom || t('min_value', { n: v.min_value });
+            }
+            if (v.max_value !== null && v.max_value !== undefined && Number(text) > v.max_value) {
+                return custom || t('max_value', { n: v.max_value });
+            }
+            return null;
+        }
+
+        if (v.min_length && text.length < v.min_length) { return custom || t('min_length', { n: v.min_length }); }
+        if (v.max_length && text.length > v.max_length) { return custom || t('max_length', { n: v.max_length }); }
+        if (v.pattern && !safeTest(v.pattern, text)) { return custom || t('pattern'); }
+
+        return null;
+    }
+
+    function validateContact(step) {
+        var values = state.answers[step.key] || {};
+        var firstError = null;
+
+        (step.fields || []).forEach(function (field) {
+            var raw = values[field.key];
+            var text = (raw === undefined || raw === null) ? '' : String(raw).trim();
+            var message = null;
+
+            if (text === '') {
+                if (field.required) { message = localized(field.label) + ' — ' + t('required'); }
+            } else if (field.type === 'email' && !isEmail(text)) {
+                message = t('invalid_email');
+            } else if (field.type === 'tel' && !/^[0-9+\-\s().]{5,20}$/.test(text)) {
+                message = t('invalid_phone');
+            } else if (field.min_length && text.length < field.min_length) {
+                message = t('min_length', { n: field.min_length });
+            } else if (field.max_length && text.length > field.max_length) {
+                message = t('max_length', { n: field.max_length });
+            } else if (field.pattern && !safeTest(field.pattern, text)) {
+                message = t('pattern');
+            }
+
+            if (message) {
+                showFieldError(field.key, message);
+                if (!firstError) { firstError = message; }
+            }
+        });
+
+        return firstError;
+    }
+
+    function isEmail(value) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
+    }
+
+    function safeTest(pattern, value) {
+        try {
+            return new RegExp(pattern).test(value);
+        } catch (e) {
+            return true; // a broken admin pattern must not block the visitor
+        }
+    }
+
+    function showFieldError(fieldKey, message) {
+        var control = el.container.querySelector('[data-field-key="' + fieldKey + '"]');
+        if (!control) { return; }
+
+        control.setAttribute('aria-invalid', 'true');
+        var target = control.parentElement && control.parentElement.querySelector('.field__error');
+        if (target) { target.textContent = message; }
+    }
+
+    function clearFieldErrors() {
+        el.container.querySelectorAll('.field__error').forEach(function (node) { node.textContent = ''; });
+        el.container.querySelectorAll('[aria-invalid]').forEach(function (node) { node.removeAttribute('aria-invalid'); });
+    }
+
+    function showStepError(message) {
+        el.stepError.textContent = message;
+        el.stepError.hidden = false;
+    }
+
+    function hideStepError() {
+        el.stepError.textContent = '';
+        el.stepError.hidden = true;
+    }
+
+    /* ------------------------------------------------------------ navigation */
+    function goNext() {
+        var steps = visibleSteps();
+        var step = steps[state.index];
+        if (!step) { return; }
+
+        var error = validateStep(step);
+
+        if (error) {
+            showStepError(error);
+            return;
+        }
+
+        hideStepError();
+
+        if (state.index === steps.length - 1) {
+            submit();
+            return;
+        }
+
+        state.index += 1;
+        persistAnswers();
+        render();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function goBack() {
+        if (state.index === 0) { return; }
+        state.index -= 1;
+        persistAnswers();
+        render();
+    }
+
+    function persistAnswers() {
+        var ui = (state.config && state.config.funnel && state.config.funnel.ui) || {};
+        if (ui.save_progress === false) { return; }
+
+        sessionWrite(storageKey('answers'), { index: state.index, answers: state.answers, version: state.config ? state.config.version : 0 });
+    }
+
+    function restoreAnswers() {
+        var ui = (state.config.funnel && state.config.funnel.ui) || {};
+        if (ui.save_progress === false) { return; }
+
+        var saved = sessionRead(storageKey('answers'), null);
+        if (!saved || typeof saved !== 'object') { return; }
+
+        // A republished funnel invalidates saved progress.
+        if (saved.version !== state.config.version) {
+            sessionRemove(storageKey('answers'));
+            return;
+        }
+
+        if (saved.answers && typeof saved.answers === 'object') { state.answers = saved.answers; }
+        if (typeof saved.index === 'number' && saved.index >= 0) { state.index = saved.index; }
+    }
+
+    /* ---------------------------------------------------------------- submit */
+    function submit() {
+        if (state.submitting) { return; }
+
+        if (state.preview) {
+            showSuccess({
+                title: localized((state.config.funnel.labels || {}).success_title) || 'Thank you',
+                message: t('preview_note')
+            });
+            return;
+        }
+
+        state.submitting = true;
+        el.next.disabled = true;
+        el.next.textContent = t('submitting');
+
+        var payload = {
+            funnel_slug: state.slug,
+            language: state.lang,
+            answers: state.answers,
+            attribution: captureAttribution(),
+            meta: { screen_size: window.innerWidth + 'x' + window.innerHeight },
+            submission_token: state.submissionToken,
+            csrf_token: state.csrf,
+            company_website: el.honeypot ? el.honeypot.value : ''
+        };
+
+        fetch('/api/public/submit-lead.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload)
+        }).then(function (response) {
+            return response.json().then(function (data) { return { status: response.status, data: data }; });
+        }).then(function (result) {
+            if (result.data && result.data.ok) {
+                sessionRemove(storageKey('answers'));
+                showSuccess(result.data.success || {});
+                return;
+            }
+
+            handleSubmitFailure(result);
+        }).catch(function () {
+            resetSubmitButton();
+            showStepError(t('generic_error'));
+        });
+    }
+
+    function handleSubmitFailure(result) {
+        resetSubmitButton();
+
+        var data = result.data || {};
+
+        if (data.errors) {
+            var steps = visibleSteps();
+            var firstKey = Object.keys(data.errors)[0];
+            var stepKey = firstKey.split('.')[0];
+            var target = steps.findIndex(function (s) { return s.key === stepKey; });
+
+            if (target !== -1) {
+                state.index = target;
+                render();
+            }
+
+            showStepError(data.errors[firstKey]);
+            return;
+        }
+
+        showStepError(data.error || t('generic_error'));
+
+        // An expired session or a consumed token needs a fresh page load.
+        if (result.status === 419 || result.status === 409) {
+            refreshSession();
+        }
+    }
+
+    function resetSubmitButton() {
+        state.submitting = false;
+        el.next.disabled = false;
+        el.next.textContent = localized((state.config.funnel.labels || {}).submit) || t('submit');
+    }
+
+    function showSuccess(success) {
+        showOnly(el.success);
+        el.progress.hidden = true;
+
+        el.successTitle.textContent = success.title
+            || localized((state.config.funnel.labels || {}).success_title)
+            || 'Thank you';
+
+        el.successMessage.textContent = success.message
+            || localized((state.config.funnel.labels || {}).success_message)
+            || '';
+
+        var whatsapp = success.whatsapp || state.config.whatsapp;
+
+        if (whatsapp && whatsapp.number) {
+            var text = whatsapp.message ? ('?text=' + encodeURIComponent(whatsapp.message)) : '';
+            el.whatsapp.href = 'https://wa.me/' + whatsapp.number + text;
+            el.whatsapp.textContent = localized(whatsapp.label) || 'WhatsApp';
+            el.whatsapp.hidden = false;
+        }
+
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    /* ----------------------------------------------------------------- boot */
+    function showError(message) {
+        showOnly(el.error);
+        el.progress.hidden = true;
+        el.errorText.textContent = message || t('error_text');
+    }
+
+    function refreshSession() {
+        return fetch('/api/public/session.php', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.ok) {
+                    state.csrf = data.csrf_token;
+                    state.submissionToken = data.submission_token;
+                }
+            })
+            .catch(function () { /* keep the server-rendered tokens */ });
+    }
+
+    function loadConfig() {
+        showOnly(el.loading);
+
+        var url = '/api/public/funnel.php?slug=' + encodeURIComponent(state.slug)
+            + (state.preview ? '&preview=1' : '');
+
+        return fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+            .then(function (response) {
+                return response.json().then(function (data) { return { status: response.status, data: data }; });
+            })
+            .then(function (result) {
+                if (!result.data || !result.data.ok || !result.data.config) {
+                    showError((result.data && result.data.error) || t('error_text'));
+                    return;
+                }
+
+                state.config = result.data.config;
+                state.steps = state.config.steps || [];
+
+                if (state.steps.length === 0) {
+                    showError(t('error_text'));
+                    return;
+                }
+
+                var funnelLanguages = (state.config.funnel && state.config.funnel.languages) || state.languages;
+                if (funnelLanguages.indexOf(state.lang) === -1) {
+                    state.lang = funnelLanguages[0] || 'en';
+                }
+
+                applyBranding();
+                restoreAnswers();
+                applyDirection();
+                render();
+            })
+            .catch(function () {
+                showError(t('error_text'));
+            });
+    }
+
+    function applyBranding() {
+        var funnel = state.config.funnel || {};
+        var theme = funnel.theme || {};
+        var style = document.documentElement.style;
+
+        if (theme.primary) { style.setProperty('--brand-primary', theme.primary); }
+        if (theme.accent) { style.setProperty('--brand-accent', theme.accent); }
+        if (theme.background) { style.setProperty('--brand-background', theme.background); }
+
+        var privacyUrl = (state.config.branding && state.config.branding.privacy_policy_url) || funnel.privacy_policy_url;
+
+        if (privacyUrl) {
+            el.privacy.href = privacyUrl;
+            el.privacy.hidden = false;
+            el.privacy.rel = 'noopener noreferrer';
+            el.privacy.target = '_blank';
+        }
+    }
+
+    function bindEvents() {
+        el.form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            goNext();
+        });
+
+        el.back.addEventListener('click', goBack);
+        el.retry.addEventListener('click', function () { loadConfig(); });
+
+        document.querySelectorAll('.lang-switch__btn').forEach(function (button) {
+            button.addEventListener('click', function () {
+                state.lang = button.dataset.language;
+                applyDirection();
+
+                // Answers and attribution survive the language switch.
+                if (state.config) { render(); }
+            });
+        });
+    }
+
+    captureAttribution();
+    bindEvents();
+    applyDirection();
+    loadConfig();
+})();

@@ -1,0 +1,29 @@
+{
+    "name": "lumera/lead-capture",
+    "description": "Lumera Dubai — dynamic lead capture funnel builder and admin dashboard",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "ext-fileinfo": "*",
+        "phpmailer/phpmailer": "^6.9",
+        "vlucas/phpdotenv": "^5.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "Lumera\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "scripts": {
+        "lint": "find . -name \"*.php\" -not -path \"./vendor/*\" -exec php -l {} \\;"
+    }
+}

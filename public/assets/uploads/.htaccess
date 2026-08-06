@@ -1,0 +1,27 @@
+# No script execution inside the uploads directory, under any circumstances.
+
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule \.(php[0-9]?|phtml|phar|pl|py|cgi|s?html?|htaccess)$ - [F,L]
+</IfModule>
+
+# Belt and braces: strip handlers so nothing here is ever interpreted.
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phar
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .php8 .phar
+AddType text/plain .php .phtml .phar
+
+<FilesMatch "\.(php[0-9]?|phtml|phar|pl|py|cgi|s?html?)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+Options -ExecCGI -Indexes
