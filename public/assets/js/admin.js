@@ -116,28 +116,76 @@
     }
 
     /* ============================================================== modal */
+    /**
+     * Modal controller.
+     *
+     * Open/closed is driven by BOTH the `hidden` attribute and an `.is-open`
+     * state class, kept in lockstep, and `isOpen()` is the single source of
+     * truth every caller and listener reads. Relying on `hidden` alone is what
+     * previously let the overlay render while the code believed it was closed.
+     */
     var modal = {
-        node: null,
+        lastFocus: null,
+
+        node: function () { return $('#modal'); },
+
+        isOpen: function () {
+            var node = this.node();
+
+            return !!node && !node.hasAttribute('hidden') && node.classList.contains('is-open');
+        },
+
         open: function (title, bodyNode, footNodes, wide) {
-            this.node = $('#modal');
+            var node = this.node();
+            if (!node) { return; }
+
+            this.lastFocus = document.activeElement;
+
             $('#modal-title').textContent = title;
 
             var bodyHost = $('#modal-body');
             clear(bodyHost);
-            bodyHost.appendChild(bodyNode);
+            if (bodyNode) { bodyHost.appendChild(bodyNode); }
 
             var footHost = $('#modal-foot');
             clear(footHost);
             (footNodes || []).forEach(function (button) { footHost.appendChild(button); });
 
-            this.node.classList.toggle('modal--wide', wide === true);
-            this.node.hidden = false;
-            document.body.style.overflow = 'hidden';
+            node.classList.toggle('modal--wide', wide === true);
+            node.classList.add('is-open');
+            node.removeAttribute('hidden');
+            node.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('has-modal');
+
+            var focusable = node.querySelector('input, select, textarea, button');
+            if (focusable) { focusable.focus(); }
         },
+
+        /**
+         * Returns state to the closed baseline. Safe to call at any time,
+         * including on a modal that is already closed.
+         */
         close: function () {
-            var node = $('#modal');
-            node.hidden = true;
+            var node = this.node();
+            if (!node) { return; }
+
+            node.classList.remove('is-open', 'modal--wide');
+            node.setAttribute('hidden', '');
+            node.setAttribute('aria-hidden', 'true');
+
+            // Leave no stale content behind for the next open.
+            clear($('#modal-title'));
+            clear($('#modal-body'));
+            clear($('#modal-foot'));
+
+            document.body.classList.remove('has-modal');
             document.body.style.overflow = '';
+
+            if (this.lastFocus && typeof this.lastFocus.focus === 'function' && document.contains(this.lastFocus)) {
+                this.lastFocus.focus();
+            }
+
+            this.lastFocus = null;
         }
     };
 
@@ -228,6 +276,107 @@
         return el('span', 'badge' + (variant ? ' badge--' + variant : ''), text);
     }
 
+    /**
+     * The one image-upload control used everywhere in the admin: funnel
+     * branding, step images and application settings all go through this and
+     * therefore through the single hardened /api/admin/upload.php endpoint.
+     *
+     * options: { label, purpose, value, help, formats, maxMb, onChange }
+     * Returns { group, input, get, set } — `input` holds the stored path and is
+     * submitted with the surrounding form.
+     */
+    function uploadField(options) {
+        options = options || {};
+
+        var purpose = options.purpose || 'logo';
+        var formats = options.formats && options.formats.length ? options.formats : ['png', 'jpg', 'jpeg', 'webp'];
+        var maxMb = options.maxMb || 2;
+
+        var group = el('div', 'form-group');
+        group.appendChild(el('label', 'form-label', options.label || 'Image'));
+
+        var path = input('upload-' + purpose + '-' + Math.random().toString(36).slice(2, 8), options.value || '');
+        path.readOnly = true;
+        path.placeholder = 'No file uploaded';
+        group.appendChild(path);
+
+        var row = el('div', 'upload-row');
+
+        var preview = document.createElement('img');
+        preview.className = 'upload-preview';
+        preview.alt = '';
+        preview.loading = 'lazy';
+        preview.hidden = !options.value;
+        if (options.value) { preview.src = options.value; }
+
+        var file = document.createElement('input');
+        file.type = 'file';
+        file.className = 'form-control';
+        file.accept = formats.map(function (ext) { return '.' + ext; }).join(',');
+
+        function announce() {
+            if (typeof options.onChange === 'function') { options.onChange(path.value); }
+        }
+
+        file.addEventListener('change', function () {
+            if (!file.files || !file.files[0]) { return; }
+
+            var formData = new FormData();
+            formData.append('file', file.files[0]);
+            formData.append('purpose', purpose);
+
+            api('/api/admin/upload.php', { method: 'POST', body: formData })
+                .then(function (response) {
+                    path.value = response.path;
+                    preview.src = response.path;
+                    preview.hidden = false;
+                    announce();
+                    toast('Uploaded. Remember to save.', 'success');
+                })
+                .catch(function (error) {
+                    file.value = '';
+
+                    if (error.data && error.data.errors && error.data.errors.file) {
+                        toast(error.data.errors.file, 'error');
+                        return;
+                    }
+
+                    toast(error.message, 'error');
+                });
+        });
+
+        row.appendChild(file);
+        row.appendChild(preview);
+
+        // "Remove" clears the stored reference only. No path from the browser
+        // is ever handed to a delete call, so this cannot touch the filesystem.
+        var removeButton = button('Remove', 'btn--ghost btn--sm', function () {
+            path.value = '';
+            preview.hidden = true;
+            preview.removeAttribute('src');
+            file.value = '';
+            announce();
+        });
+
+        row.appendChild(removeButton);
+        group.appendChild(row);
+
+        group.appendChild(el('p', 'form-help',
+            (options.help ? options.help + ' ' : '')
+            + formats.join(', ').toUpperCase() + ' up to ' + maxMb + ' MB.'));
+
+        return {
+            group: group,
+            input: path,
+            get: function () { return path.value; },
+            set: function (value) {
+                path.value = value || '';
+                preview.hidden = !value;
+                if (value) { preview.src = value; } else { preview.removeAttribute('src'); }
+            }
+        };
+    }
+
     function button(label, className, onClick) {
         var node = el('button', 'btn ' + className, label);
         node.type = 'button';
@@ -308,6 +457,7 @@
         $: $, $$: $$, el: el, clear: clear, api: api, toast: toast, modal: modal,
         confirmAction: confirmAction, formGroup: formGroup, input: input,
         textarea: textarea, select: select, checkbox: checkbox, badge: badge,
+        uploadField: uploadField,
         button: button, miniButton: miniButton, table: table, emptyState: emptyState,
         barList: barList, formatDate: formatDate, relative: relative,
         STATUS_VARIANTS: STATUS_VARIANTS, EMAIL_VARIANTS: EMAIL_VARIANTS
@@ -1176,49 +1326,37 @@
         actions: function () { return []; },
         render: function () {
             return api('/api/admin/settings.php').then(function (data) {
-                renderSettingsForm(data.settings);
+                renderSettingsForm(data.settings, data.uploads || {});
                 renderEnvironment(data.environment);
             });
         }
     };
 
-    function renderSettingsForm(settings) {
+    function renderSettingsForm(settings, uploads) {
         var host = $('#settings-form');
         clear(host);
 
+        uploads = uploads || {};
+
         var company = input('set-company', settings.company_name || '');
-        host.appendChild(formGroup('Company display name', company));
+        host.appendChild(formGroup('Company display name', company,
+            'Used wherever a funnel has not set its own company name.'));
 
-        var logoGroup = el('div', 'form-group');
-        logoGroup.appendChild(el('label', 'form-label', 'Company logo'));
-
-        var logoPath = input('set-logo', settings.company_logo || '', 'text', '/assets/uploads/…');
-        logoPath.readOnly = true;
-        logoGroup.appendChild(logoPath);
-
-        var fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.className = 'form-control';
-        fileInput.accept = '.png,.jpg,.jpeg,.webp';
-
-        fileInput.addEventListener('change', function () {
-            if (!fileInput.files || !fileInput.files[0]) { return; }
-
-            var formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            formData.append('purpose', 'logo');
-
-            api('/api/admin/upload.php', { method: 'POST', body: formData })
-                .then(function (response) {
-                    logoPath.value = response.path;
-                    toast('Logo uploaded. Remember to save.', 'success');
-                })
-                .catch(function (error) { toast(error.message, 'error'); });
+        // Same shared uploader as the funnel branding panel — one upload path.
+        var logo = uploadField({
+            label: 'Company logo',
+            purpose: 'logo',
+            value: settings.company_logo || '',
+            help: 'Shown on the public funnel, the admin sidebar and the sign-in page. Falls back to the company initial when empty.',
+            formats: uploads.logo_formats,
+            maxMb: uploads.max_mb
         });
+        host.appendChild(logo.group);
 
-        logoGroup.appendChild(fileInput);
-        logoGroup.appendChild(el('p', 'form-help', 'PNG, JPG or WEBP up to 2 MB. SVG is not accepted.'));
-        host.appendChild(logoGroup);
+        var tagline = input('set-tagline', settings.site_tagline || '', 'text',
+            'e.g. Find the right property in Dubai');
+        host.appendChild(formGroup('Website tagline', tagline,
+            'Browser title becomes "{Company Name} — {Tagline}" and the tagline is used as the page meta description. Leave empty to show the company name alone.'));
 
         var language = select('set-language', [
             { value: 'en', label: 'English' }, { value: 'ar', label: 'Arabic' }
@@ -1239,7 +1377,7 @@
 
         var subject = input('set-subject', settings.notification_subject_template || '');
         host.appendChild(formGroup('Notification subject template', subject,
-            'Tokens: {lead_id} {full_name} {purpose} {budget} {score} {funnel}'));
+            'Tokens: {lead_id} {full_name} {purpose} {budget} {score} {funnel} {company}'));
 
         host.appendChild(button('Save settings', 'btn--primary', function () {
             api('/api/admin/settings.php', {
@@ -1247,7 +1385,8 @@
                 body: {
                     settings: {
                         company_name: company.value,
-                        company_logo: logoPath.value,
+                        company_logo: logo.get(),
+                        site_tagline: tagline.value,
                         admin_interface_language: language.value,
                         timezone: timezone.value,
                         privacy_policy_url: privacy.value,
@@ -1359,12 +1498,18 @@
                 .catch(function () { window.location.href = '/admin/login.php'; });
         });
 
-        $$('[data-modal-close]').forEach(function (node) {
-            node.addEventListener('click', function () { modal.close(); });
+        // Delegated once at the document level: no per-element listeners to
+        // duplicate when a view re-renders, and it covers the close button and
+        // the backdrop with one rule.
+        document.addEventListener('click', function (event) {
+            if (event.target.closest('[data-modal-close]')) {
+                event.preventDefault();
+                modal.close();
+            }
         });
 
         document.addEventListener('keydown', function (event) {
-            if (event.key === 'Escape' && !$('#modal').hidden) { modal.close(); }
+            if (event.key === 'Escape' && modal.isOpen()) { modal.close(); }
         });
 
         window.addEventListener('hashchange', navigate);
@@ -1386,6 +1531,11 @@
     };
 
     bindChrome();
+
+    // Normalise the overlay to its closed baseline on every load, so a cached
+    // page or a half-finished render can never leave the admin behind a dead
+    // backdrop. Nothing may open a modal except an explicit user action.
+    modal.close();
 
     // funnel-builder.js registers Lumera.views.builder on the same defer queue.
     window.setTimeout(navigate, 0);

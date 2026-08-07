@@ -21,7 +21,7 @@ $e = static fn ($v) => Str::e((string) $v);
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Dashboard — <?= $e($company) ?></title>
-<link rel="stylesheet" href="/assets/css/admin.css?v=1">
+<link rel="stylesheet" href="/assets/css/admin.css?v=2">
 </head>
 <body class="admin-body"
       data-csrf="<?= $e($csrf) ?>"
@@ -33,7 +33,11 @@ $e = static fn ($v) => Str::e((string) $v);
     <!-- ------------------------------------------------------------ sidebar -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar__head">
-            <span class="sidebar__mark">L</span>
+            <?php if (($logo ?? '') !== ''): ?>
+                <img class="sidebar__logo" src="<?= $e($logo) ?>" alt="<?= $e($company) ?>">
+            <?php else: ?>
+                <span class="sidebar__mark"><?= $e(mb_strtoupper(mb_substr($company, 0, 1))) ?></span>
+            <?php endif; ?>
             <span class="sidebar__name"><?= $e($company) ?></span>
         </div>
 
@@ -236,7 +240,7 @@ $e = static fn ($v) => Str::e((string) $v);
     <?php foreach ($timezones as $timezone): ?><option value="<?= $e($timezone) ?>"><?= $e($timezone) ?></option><?php endforeach; ?>
 </template>
 
-<script src="/assets/js/admin.js?v=1" defer></script>
-<script src="/assets/js/funnel-builder.js?v=1" defer></script>
+<script src="/assets/js/admin.js?v=2" defer></script>
+<script src="/assets/js/funnel-builder.js?v=2" defer></script>
 </body>
 </html>

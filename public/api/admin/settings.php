@@ -19,6 +19,7 @@ use Lumera\Core\Config;
 use Lumera\Core\Response;
 use Lumera\Mail\Mailer;
 use Lumera\Repositories\SettingsRepository;
+use Lumera\Services\UploadService;
 use Lumera\Support\Request;
 use Lumera\Support\Str;
 
@@ -28,9 +29,15 @@ $settings = new SettingsRepository();
 if (Request::method() === 'GET') {
     AdminEndpoint::read($basePath);
 
+    $uploads = new UploadService();
+
     Response::success([
         'settings' => $settings->all(),
         'editable' => array_keys(SettingsRepository::EDITABLE),
+        'uploads'  => [
+            'max_mb'       => (int) ($uploads->maxBytes() / 1024 / 1024),
+            'logo_formats' => $uploads->allowedExtensions('logo'),
+        ],
         'environment' => [
             // Booleans and non-secret descriptors only.
             'app_env'          => Config::string('APP_ENV', 'production'),
@@ -86,10 +93,18 @@ foreach ($input as $key => $value) {
             break;
 
         case 'company_logo':
+            // Empty means "remove the logo": the reference is cleared, no file
+            // path from the request is ever passed to a delete call.
             if ($value !== '' && preg_match('#^/assets/uploads/[A-Za-z0-9._-]+$#', $value) !== 1) {
                 $errors['company_logo'] = 'Upload the logo first, then save.';
                 continue 2;
             }
+            break;
+
+        case 'site_tagline':
+            // Optional. Escaped at render time; length-capped so it cannot
+            // bloat the page metadata.
+            $value = Str::clean($value, 190);
             break;
 
         case 'admin_interface_language':

@@ -14,10 +14,18 @@ use Lumera\Core\Database;
  */
 final class SettingsRepository
 {
-    /** key => [type, is_public] */
+    /**
+     * key => [type, is_public]
+     *
+     * `is_public` marks the values that may be served through the public API
+     * and rendered into public pages. Everything else stays admin-only, and no
+     * secret is ever stored here — those live in .env.
+     */
     public const EDITABLE = [
         'company_name'                 => ['string', 1],
         'company_logo'                 => ['string', 1],
+        // Rendered into the public <title> and <meta name="description">.
+        'site_tagline'                 => ['string', 1],
         'admin_interface_language'     => ['string', 0],
         'timezone'                     => ['string', 0],
         'privacy_policy_url'           => ['string', 1],

@@ -25,6 +25,8 @@ $view = [
     'admin'    => $admin,
     'csrf'     => Csrf::token('admin'),
     'company'  => (string) $settings->get('company_name', 'Lead Capture'),
+    'logo'     => (string) $settings->get('company_logo', ''),
+    'tagline'  => (string) $settings->get('site_tagline', ''),
     'funnelId' => $funnel !== null ? (int) $funnel['id'] : 0,
     'funnelSlug' => $funnel !== null ? (string) $funnel['slug'] : '',
     'timezones' => timezone_identifiers_list(),

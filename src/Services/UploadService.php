@@ -37,6 +37,9 @@ final class UploadService
         'logo'       => ['png', 'svg', 'webp', 'jpg', 'jpeg'],
         'favicon'    => ['png', 'svg', 'webp', 'ico'],
         'background' => ['png', 'webp', 'jpg', 'jpeg'],
+        // Step images are raster only: an inline SVG in the funnel body would
+        // widen the attack surface for no editorial benefit.
+        'step'       => ['jpg', 'jpeg', 'png', 'webp'],
     ];
 
     /** Configurable ceiling, clamped so a misconfiguration cannot open it wide. */

@@ -164,6 +164,7 @@ final class FunnelManager
                     'description_ar' => $step['description_ar'],
                     'placeholder_en' => $step['placeholder_en'],
                     'placeholder_ar' => $step['placeholder_ar'],
+                    'image_path'     => $step['image_path'],
                     'is_required'    => $step['is_required'],
                     'is_active'      => $step['is_active'],
                     'auto_advance'   => $step['auto_advance'],

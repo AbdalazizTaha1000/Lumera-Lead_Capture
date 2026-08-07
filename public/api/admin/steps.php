@@ -137,6 +137,7 @@ switch ($action) {
                 'description_ar' => $step['description_ar'],
                 'placeholder_en' => $step['placeholder_en'],
                 'placeholder_ar' => $step['placeholder_ar'],
+                'image_path'     => $step['image_path'],
                 'is_required'    => $step['is_required'],
                 'is_active'      => 0, // a copy starts inactive so it cannot go live by accident
                 'auto_advance'   => $step['auto_advance'],

@@ -88,11 +88,28 @@ final class StepValidator
 
         $condition = $this->normalizeCondition($funnelId, $input, $key);
 
+        // The step image is stored as a path produced by UploadService. Only
+        // that shape is accepted, so a crafted payload cannot point the funnel
+        // at an arbitrary file.
+        $imagePath = null;
+
+        if (array_key_exists('image_path', $input)) {
+            $candidate = trim((string) $input['image_path']);
+
+            if ($candidate === '') {
+                $imagePath = null; // explicit removal
+            } elseif (preg_match('#^/assets/uploads/[A-Za-z0-9._-]+$#', $candidate) === 1) {
+                $imagePath = $candidate;
+            } else {
+                $this->errors['image_path'] = 'Upload the image first, then save.';
+            }
+        }
+
         if ($this->errors !== []) {
             return null;
         }
 
-        return [
+        $data = [
             'step_key'   => $key,
             'step_type'  => $type,
             'title_en'   => $titleEn,
@@ -115,6 +132,14 @@ final class StepValidator
             'condition_operator'    => $condition['operator'],
             'condition_value'       => $condition['value'],
         ];
+
+        // Only written when the caller actually supplied the field, so a
+        // partial update never wipes an existing image.
+        if (array_key_exists('image_path', $input)) {
+            $data['image_path'] = $imagePath;
+        }
+
+        return $data;
     }
 
     /**

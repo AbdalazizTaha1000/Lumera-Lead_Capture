@@ -128,5 +128,6 @@ INSERT INTO `app_settings` (`setting_key`, `setting_value`, `value_type`, `is_pu
     ('admin_interface_language',    'en',                        'string', 0),
     ('timezone',                    'Asia/Dubai',                'string', 0),
     ('privacy_policy_url',          '',                          'string', 1),
+    ('site_tagline',                'Find the right property in Dubai', 'string', 1),
     ('notification_subject_template','New Lead #{lead_id} — {full_name} ({purpose})', 'string', 0)
 ON DUPLICATE KEY UPDATE `setting_key` = VALUES(`setting_key`);

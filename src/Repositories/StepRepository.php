@@ -12,7 +12,7 @@ final class StepRepository
     private const WRITABLE = [
         'step_key', 'step_type',
         'title_en', 'title_ar', 'description_en', 'description_ar',
-        'placeholder_en', 'placeholder_ar',
+        'placeholder_en', 'placeholder_ar', 'image_path',
         'is_required', 'is_active', 'auto_advance',
         'min_length', 'max_length', 'min_value', 'max_value',
         'validation_pattern', 'validation_message_en', 'validation_message_ar',

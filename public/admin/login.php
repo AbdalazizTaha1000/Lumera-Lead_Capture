@@ -21,8 +21,10 @@ if (Auth::check()) {
 }
 
 $csrf    = Csrf::token('admin_login');
-$company = (new SettingsRepository())->get('company_name', 'Lead Capture');
-$e       = static fn ($v) => Str::e((string) $v);
+$settings = new SettingsRepository();
+$company  = (string) $settings->get('company_name', 'Lead Capture');
+$logo     = (string) $settings->get('company_logo', '');
+$e        = static fn ($v) => Str::e((string) $v);
 ?>
 <!doctype html>
 <html lang="en">
@@ -31,14 +33,18 @@ $e       = static fn ($v) => Str::e((string) $v);
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Sign in — <?= $e($company) ?></title>
-<link rel="stylesheet" href="/assets/css/admin.css?v=1">
+<link rel="stylesheet" href="/assets/css/admin.css?v=2">
 </head>
 <body class="auth-body">
 
 <main class="auth">
     <div class="auth__card">
         <div class="auth__brand">
-            <span class="auth__mark">L</span>
+            <?php if ($logo !== ''): ?>
+                <img class="auth__logo" src="<?= $e($logo) ?>" alt="<?= $e($company) ?>">
+            <?php else: ?>
+                <span class="auth__mark"><?= $e(mb_strtoupper(mb_substr($company, 0, 1))) ?></span>
+            <?php endif; ?>
             <div>
                 <p class="auth__company"><?= $e($company) ?></p>
                 <p class="auth__subtitle">Lead capture dashboard</p>

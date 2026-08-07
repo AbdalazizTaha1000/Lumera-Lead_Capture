@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS `funnel_steps` (
     `description_ar`         TEXT NULL,
     `placeholder_en`         VARCHAR(190) NULL DEFAULT NULL,
     `placeholder_ar`         VARCHAR(190) NULL DEFAULT NULL,
+    `image_path`             VARCHAR(255) NULL DEFAULT NULL,   -- optional step image
 
     `is_required`            TINYINT(1) NOT NULL DEFAULT 1,
     `is_active`              TINYINT(1) NOT NULL DEFAULT 1,

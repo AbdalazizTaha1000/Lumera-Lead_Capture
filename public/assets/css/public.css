@@ -238,6 +238,49 @@ button { font: inherit; }
 }
 
 /* ----------------------------------------------------------------- steps */
+/* Optional step image. Mobile-first: stacked above the question. On wider
+ * screens the step becomes two columns and the image sits beside it.
+ * The element only exists when a step actually has an image, so funnels
+ * without one keep their original spacing exactly. */
+.step__media {
+    margin: 0 0 var(--space-5);
+    /* A fixed ratio box reserves the space before the image decodes, so the
+     * question never jumps as it loads. */
+    aspect-ratio: 16 / 10;
+    width: 100%;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: color-mix(in srgb, var(--brand-primary) 4%, var(--surface));
+    border: 1px solid var(--line);
+}
+
+.step__image {
+    width: 100%;
+    height: 100%;
+    /* contain, never cover: nothing important is ever cropped away. */
+    object-fit: contain;
+    object-position: center;
+    display: block;
+}
+
+@media (min-width: 900px) {
+    .step--has-image {
+        display: grid;
+        grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+        gap: var(--space-5);
+        align-items: start;
+    }
+
+    .step--has-image .step__media {
+        margin-bottom: 0;
+        position: sticky;
+        top: var(--space-4);
+    }
+
+    /* The text column is narrower beside an image, so options stay single file. */
+    .step--has-image .options--grid { grid-template-columns: 1fr; }
+}
+
 .step__title {
     margin: 0 0 var(--space-2);
     font-size: 22px;

@@ -84,6 +84,7 @@ $config['branding'] = [
     'company_name'       => $config['funnel']['company_name'] ?? ($public['company_name'] ?? ''),
     'company_logo'       => ($config['funnel']['theme']['logo'] ?? null) ?: ($public['company_logo'] ?? null),
     'favicon'            => $config['funnel']['theme']['favicon'] ?? null,
+    'tagline'            => $public['site_tagline'] ?? '',
     'privacy_policy_url' => $config['funnel']['privacy_policy_url'] ?? ($public['privacy_policy_url'] ?? null),
 ];
 

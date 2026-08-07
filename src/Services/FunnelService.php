@@ -68,6 +68,9 @@ final class FunnelService
                 'title'        => ['en' => (string) $step['title_en'], 'ar' => (string) $step['title_ar']],
                 'description'  => ['en' => (string) ($step['description_en'] ?? ''), 'ar' => (string) ($step['description_ar'] ?? '')],
                 'placeholder'  => ['en' => (string) ($step['placeholder_en'] ?? ''), 'ar' => (string) ($step['placeholder_ar'] ?? '')],
+                // Optional. Null for every step that has no image, so funnels
+                // built before this feature keep rendering unchanged.
+                'image'        => ($step['image_path'] ?? '') ?: null,
                 'validation'   => [
                     'min_length' => $step['min_length'] !== null ? (int) $step['min_length'] : null,
                     'max_length' => $step['max_length'] !== null ? (int) $step['max_length'] : null,
@@ -189,6 +192,7 @@ final class FunnelService
                 'title'        => $step['title'] ?? ['en' => '', 'ar' => ''],
                 'description'  => $step['description'] ?? ['en' => '', 'ar' => ''],
                 'placeholder'  => $step['placeholder'] ?? ['en' => '', 'ar' => ''],
+                'image'        => $step['image'] ?? null,
                 'validation'   => $step['validation'] ?? [],
                 'condition'    => $step['condition'] ?? null,
                 'options'      => [],

@@ -6,6 +6,7 @@
  * @var string $slug
  * @var string $name
  * @var string $companyName
+ * @var string $tagline
  * @var string $logo
  * @var string $favicon
  * @var string $backgroundImage
@@ -21,6 +22,12 @@ use Lumera\Support\Str;
 
 $e   = static fn ($v) => Str::e((string) $v);
 $dir = $defaultLanguage === 'ar' ? 'rtl' : 'ltr';
+
+// Page metadata: "{Company Name} — {Tagline}", or just the company name when no
+// tagline is configured. The company name resolves from the funnel first and
+// only falls back to the global setting, so each funnel brands its own page.
+$tagline   = trim((string) ($tagline ?? ''));
+$pageTitle = $tagline !== '' ? $companyName . ' — ' . $tagline : $companyName;
 ?>
 <!doctype html>
 <html lang="<?= $e($defaultLanguage) ?>" dir="<?= $e($dir) ?>">
@@ -28,14 +35,24 @@ $dir = $defaultLanguage === 'ar' ? 'rtl' : 'ltr';
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<title><?= $e($name) ?> — <?= $e($companyName) ?></title>
+<title><?= $e($pageTitle) ?></title>
+<?php if ($tagline !== ''): ?>
+<meta name="description" content="<?= $e($tagline) ?>">
+<?php endif; ?>
+<meta property="og:title" content="<?= $e($pageTitle) ?>">
+<?php if ($tagline !== ''): ?>
+<meta property="og:description" content="<?= $e($tagline) ?>">
+<?php endif; ?>
+<?php if ($logo !== ''): ?>
+<meta property="og:image" content="<?= $e($logo) ?>">
+<?php endif; ?>
 <?php if (($favicon ?? '') !== ''): ?>
 <link rel="icon" href="<?= $e($favicon) ?>">
 <?php else: ?>
 <link rel="icon" href="/favicon.ico" sizes="any">
 <?php endif; ?>
 <meta name="theme-color" content="<?= $e($theme['primary']) ?>">
-<link rel="stylesheet" href="/assets/css/public.css?v=2">
+<link rel="stylesheet" href="/assets/css/public.css?v=3">
 <style>
 :root {
     --brand-primary: <?= $e($theme['primary']) ?>;
@@ -146,6 +163,6 @@ $dir = $defaultLanguage === 'ar' ? 'rtl' : 'ltr';
     </footer>
 </main>
 
-<script src="/assets/js/public-funnel.js?v=1" defer></script>
+<script src="/assets/js/public-funnel.js?v=2" defer></script>
 </body>
 </html>

@@ -319,7 +319,8 @@ Both SQL files are idempotent and safe to re-run.
 `lead_notes`, `app_settings`, `login_attempts`, `rate_limit_entries`,
 `audit_logs`.
 
-`funnels` carries the per-funnel branding (`company_name`, `logo_path`,
+`funnel_steps.image_path` holds the optional step image, and `app_settings`
+carries `site_tagline`. `funnels` carries the per-funnel branding (`company_name`, `logo_path`,
 `favicon_path`, `primary_color`, `accent_color`, `background_color`), the
 per-funnel delivery settings (`recipient_email`, `redirect_url`,
 `redirect_delay`, `webhook_url`, `webhook_enabled`), the success-button
@@ -708,6 +709,10 @@ server's own network.
 
 The editor gives you:
 
+* **Step image** — an optional image for the step, in any step type. Upload,
+  preview, replace or remove it. On mobile it sits above the question; from
+  900px wide it moves beside it. Steps without an image render exactly as
+  before — no placeholder, no extra spacing.
 * **English content / Arabic content** tabs — title, description, placeholder
   and a custom validation message per language.
 * **Step settings** — internal key, step type, required, active, auto-advance.
@@ -879,10 +884,33 @@ companies. **Funnel Builder → Branding** controls, per funnel:
 languages, submit/success/WhatsApp captions, email recipient, redirect,
 webhook, privacy URL, minimum completion time and the UI toggles.
 
-**Settings** (top-level) still holds installation-wide values — company display
-name, logo, default interface language, timezone, privacy URL and the
-notification subject template. These act as the *fallback* when a funnel has not
-set its own.
+**Settings** (top-level) holds installation-wide values — company display name,
+company logo, website tagline, default interface language, timezone, privacy URL
+and the notification subject template. These act as the *fallback* when a funnel
+has not set its own.
+
+### Company logo
+
+Upload it in **Settings → Company logo**. It appears on the public funnel
+header, in the admin sidebar and on the sign-in page. When a funnel sets its own
+logo, that one wins on its public page. With no logo anywhere, the company's
+initial is shown instead. **Remove** clears the reference only — it never
+deletes a file, so nothing else that points at the same upload can break.
+
+### Website tagline
+
+**Settings → Website tagline** drives the public page metadata:
+
+```html
+<title>{Company Name} — {Tagline}</title>
+<meta name="description" content="{Tagline}">
+```
+
+With no tagline the title is just `{Company Name}` and the description is
+omitted. The company name resolves **per funnel first**, so
+`/reef-996` renders `Reef Developments — …` while `/property-finder` renders
+`Lumera Dubai Real Estate — …` from the same installation. Both are rendered
+server side and HTML-escaped.
 
 Branding changes apply immediately; step and option changes still require
 Publish.
@@ -896,6 +924,10 @@ Accepted formats per purpose:
 | Logo | PNG, SVG, WebP, JPG, JPEG |
 | Favicon | PNG, SVG, WebP, ICO |
 | Background | PNG, WebP, JPG, JPEG |
+| Step image | PNG, JPG, JPEG, WebP |
+
+Step images are raster only: an inline SVG in the funnel body would widen the
+attack surface for no editorial benefit.
 
 The size ceiling is configurable with `UPLOAD_MAX_SIZE_MB` (default 2, clamped
 to 1–10 by the application).

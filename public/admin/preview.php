@@ -44,6 +44,7 @@ $view = [
     'slug'            => (string) $funnel['slug'],
     'name'            => (string) $funnel['name'],
     'companyName'     => $service->companyName($funnel),
+    'tagline'         => (string) ($public['site_tagline'] ?? ''),
     'logo'            => ($funnel['logo_path'] ?? '') ?: ($public['company_logo'] ?? ''),
     'favicon'         => (string) ($funnel['favicon_path'] ?? ''),
     'backgroundImage' => (string) ($funnel['background_image_path'] ?? ''),

@@ -60,6 +60,9 @@ $view = [
     'slug'            => (string) $funnel['slug'],
     'name'            => (string) $funnel['name'],
     'companyName'     => $service->companyName($funnel),
+    // Global setting: there is no per-funnel tagline, so the funnel supplies
+    // the company name and the application settings supply the tagline.
+    'tagline'         => (string) ($public['site_tagline'] ?? ''),
     'logo'            => $logo,
     'favicon'         => ($funnel['favicon_path'] ?? '') ?: '',
     'backgroundImage' => $backgroundImage,

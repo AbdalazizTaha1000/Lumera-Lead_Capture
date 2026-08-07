@@ -316,21 +316,45 @@
         clear(el.container);
         hideStepError();
 
+        // A step image is optional for every step type. When absent, nothing is
+        // added to the DOM at all — no placeholder, no spacing change.
+        var hasImage = typeof step.image === 'string' && step.image !== '';
+        el.container.classList.toggle('step--has-image', hasImage);
+
+        if (hasImage) {
+            var figure = element('figure', 'step__media');
+            var image = document.createElement('img');
+
+            image.className = 'step__image';
+            image.src = step.image;
+            image.alt = '';                 // decorative: the question carries the meaning
+            image.decoding = 'async';
+            // The first step is above the fold; later ones can load lazily.
+            image.loading = state.index === 0 ? 'eager' : 'lazy';
+
+            figure.appendChild(image);
+            el.container.appendChild(figure);
+        }
+
+        var content = element('div', 'step__content');
+
         var heading = element('h1', 'step__title', localized(step.title));
 
         if (step.required) {
             heading.appendChild(element('span', 'step__required-hint', '*'));
         }
 
-        el.container.appendChild(heading);
+        content.appendChild(heading);
 
         var description = localized(step.description);
 
         if (description) {
-            el.container.appendChild(element('p', 'step__description', description));
+            content.appendChild(element('p', 'step__description', description));
         }
 
-        renderBody(step);
+        el.container.appendChild(content);
+
+        renderBody(step, content);
 
         var ui = (state.config.funnel && state.config.funnel.ui) || {};
         el.back.hidden = !(ui.back_button !== false && state.index > 0);
@@ -348,41 +372,45 @@
         if (focusable && window.innerWidth > 700) { focusable.focus(); }
     }
 
-    function renderBody(step) {
+    /**
+     * Renders the answer controls into `host` — the text column, which sits
+     * beside the step image on wide screens and below it on mobile.
+     */
+    function renderBody(step, host) {
         switch (step.type) {
             case 'single_select':
-                renderOptions(step, false);
+                renderOptions(step, false, host);
                 break;
             case 'multi_select':
-                renderOptions(step, true);
+                renderOptions(step, true, host);
                 break;
             case 'dropdown':
-                renderDropdown(step);
+                renderDropdown(step, host);
                 break;
             case 'contact_information':
-                renderContact(step);
+                renderContact(step, host);
                 break;
             case 'consent':
-                renderConsent(step);
+                renderConsent(step, host);
                 break;
             case 'information':
-                renderInformation(step);
+                renderInformation(step, host);
                 break;
             case 'email':
-                renderInput(step, 'email');
+                renderInput(step, 'email', host);
                 break;
             case 'phone':
-                renderInput(step, 'tel');
+                renderInput(step, 'tel', host);
                 break;
             case 'number':
-                renderInput(step, 'number');
+                renderInput(step, 'number', host);
                 break;
             default:
-                renderInput(step, 'text');
+                renderInput(step, 'text', host);
         }
     }
 
-    function renderOptions(step, multi) {
+    function renderOptions(step, multi, host) {
         var options = step.options || [];
         var wrap = element('div', 'options' + (multi ? ' options--multi' : '') + (options.length > 3 ? ' options--grid' : ''));
         var current = state.answers[step.key];
@@ -436,10 +464,10 @@
             wrap.appendChild(button);
         });
 
-        el.container.appendChild(wrap);
+        host.appendChild(wrap);
     }
 
-    function renderDropdown(step) {
+    function renderDropdown(step, host) {
         var field = element('div', 'field');
         var select = document.createElement('select');
         select.className = 'field__control';
@@ -466,10 +494,10 @@
         });
 
         field.appendChild(select);
-        el.container.appendChild(field);
+        host.appendChild(field);
     }
 
-    function renderInput(step, inputType) {
+    function renderInput(step, inputType, host) {
         var field = element('div', 'field');
         var input = document.createElement('input');
 
@@ -494,10 +522,10 @@
         });
 
         field.appendChild(input);
-        el.container.appendChild(field);
+        host.appendChild(field);
     }
 
-    function renderConsent(step) {
+    function renderConsent(step, host) {
         var label = element('label', 'consent' + (state.answers[step.key] ? ' is-selected' : ''));
         var input = document.createElement('input');
 
@@ -517,18 +545,18 @@
         // when present and fall back to the title.
         label.appendChild(element('span', 'consent__text', localized(step.description) || localized(step.title)));
 
-        el.container.appendChild(label);
+        host.appendChild(label);
     }
 
-    function renderInformation(step) {
+    function renderInformation(step, host) {
         var body = localized(step.description);
 
         if (body) {
-            el.container.appendChild(element('div', 'information-body', body));
+            host.appendChild(element('div', 'information-body', body));
         }
     }
 
-    function renderContact(step) {
+    function renderContact(step, host) {
         var fields = step.fields || [];
         var values = state.answers[step.key] || {};
         var wrap = element('div', 'contact-fields');
@@ -557,7 +585,7 @@
             wrap.appendChild(node);
         });
 
-        el.container.appendChild(wrap);
+        host.appendChild(wrap);
     }
 
     function buildContactField(step, field, values) {

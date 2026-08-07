@@ -372,6 +372,21 @@
         var form = el('div');
         var fields = {};
 
+        /* --- step image (optional, every step type supports one) --- */
+        var media = el('div', 'editor__section editor__section--first');
+        media.appendChild(el('p', 'editor__section-title', 'Step image'));
+
+        var imageField = uploadField(
+            'Image',
+            'step',
+            step.image_path,
+            'Optional. Shown above the question on mobile and beside it on wider screens.'
+        );
+
+        fields.image_path = imageField.input;
+        media.appendChild(imageField.group);
+        form.appendChild(media);
+
         /* --- language tabs --- */
         var tabs = el('div', 'tabs');
         var panels = el('div');
@@ -560,6 +575,7 @@
             description_ar: fields.description_ar.value,
             placeholder_en: fields.placeholder_en.value,
             placeholder_ar: fields.placeholder_ar.value,
+            image_path: fields.image_path.value,
             validation_message_en: fields.validation_message_en.value,
             validation_message_ar: fields.validation_message_ar.value,
             is_required: fields.is_required.checked,
@@ -917,66 +933,20 @@
 
     /* ============================================================ branding */
     /**
-     * Shared uploader: posts to the existing upload endpoint and writes the
-     * returned path into a read-only field, saved with the surrounding form.
+     * Thin wrapper around the shared uploader in admin.js, pre-filled with the
+     * formats and size ceiling the server advertises for this installation.
+     * There is deliberately no second upload implementation here.
      */
-    function uploadField(labelText, purpose, currentValue, helpText) {
-        var group = el('div', 'form-group');
-        group.appendChild(el('label', 'form-label', labelText));
-
-        var path = L.input('upload-' + purpose, currentValue || '');
-        path.readOnly = true;
-        path.placeholder = 'No file uploaded';
-        group.appendChild(path);
-
-        var row = el('div', 'upload-row');
-
-        var preview = document.createElement('img');
-        preview.className = 'upload-preview';
-        preview.alt = '';
-        preview.hidden = !currentValue;
-        if (currentValue) { preview.src = currentValue; }
-
-        var file = document.createElement('input');
-        file.type = 'file';
-        file.className = 'form-control';
-
-        var formats = (state.meta && state.meta[purpose + '_formats']) || ['png', 'webp'];
-        file.accept = formats.map(function (ext) { return '.' + ext; }).join(',');
-
-        file.addEventListener('change', function () {
-            if (!file.files || !file.files[0]) { return; }
-
-            var formData = new FormData();
-            formData.append('file', file.files[0]);
-            formData.append('purpose', purpose);
-
-            api('/api/admin/upload.php', { method: 'POST', body: formData })
-                .then(function (response) {
-                    path.value = response.path;
-                    preview.src = response.path;
-                    preview.hidden = false;
-                    toast('Uploaded. Remember to save.', 'success');
-                })
-                .catch(showErrors);
+    function uploadField(labelText, purpose, currentValue, helpText, onChange) {
+        return L.uploadField({
+            label: labelText,
+            purpose: purpose,
+            value: currentValue,
+            help: helpText,
+            formats: (state.meta && state.meta[purpose + '_formats']) || null,
+            maxMb: (state.meta && state.meta.upload_max_mb) || 2,
+            onChange: onChange
         });
-
-        row.appendChild(file);
-        row.appendChild(preview);
-
-        row.appendChild(L.button('Clear', 'btn--ghost btn--sm', function () {
-            path.value = '';
-            preview.hidden = true;
-            file.value = '';
-        }));
-
-        group.appendChild(row);
-
-        var maxMb = (state.meta && state.meta.upload_max_mb) || 2;
-        group.appendChild(el('p', 'form-help',
-            (helpText ? helpText + ' ' : '') + formats.join(', ').toUpperCase() + ' up to ' + maxMb + ' MB.'));
-
-        return { group: group, input: path };
     }
 
     /** A colour swatch and hex field kept in sync. */

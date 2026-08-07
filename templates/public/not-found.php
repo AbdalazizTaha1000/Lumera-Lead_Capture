@@ -9,7 +9,12 @@
 use Lumera\Support\Str;
 
 $company = $public['company_name'] ?? '';
+$tagline = trim((string) ($public['site_tagline'] ?? ''));
 $e = static fn ($v) => Str::e((string) $v);
+
+$pageTitle = $company !== ''
+    ? ($tagline !== '' ? $company . ' — ' . $tagline : $company)
+    : 'Not found';
 ?>
 <!doctype html>
 <html lang="en">
@@ -17,8 +22,11 @@ $e = static fn ($v) => Str::e((string) $v);
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Not found</title>
-<link rel="stylesheet" href="/assets/css/public.css?v=2">
+<title><?= $e($pageTitle) ?></title>
+<?php if ($tagline !== ''): ?>
+<meta name="description" content="<?= $e($tagline) ?>">
+<?php endif; ?>
+<link rel="stylesheet" href="/assets/css/public.css?v=3">
 </head>
 <body class="funnel-body">
 <main class="funnel">
