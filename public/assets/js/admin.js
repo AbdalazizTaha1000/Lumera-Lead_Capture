@@ -3,8 +3,8 @@
  * Router, API client, UI primitives (toast / modal / confirm), and the
  * Dashboard, Leads and Settings views.
  *
- * The Funnel Builder view lives in funnel-builder.js and registers itself on
- * window.Lumera.
+ * The Funnel Builder is a separate full-screen surface (/admin/builder.php),
+ * reached from the Funnels list.
  * ========================================================================= */
 (function () {
     'use strict';
@@ -558,18 +558,25 @@
             list.appendChild(line);
         }
 
+        // Version numbers are an implementation detail and stay hidden here:
+        // the funnel is Draft, Live or Paused, nothing more.
+        var live = funnel.status === 'active' && funnel.published_version > 0;
+        var liveState = funnel.status === 'paused' ? 'paused' : (live ? 'live' : 'draft');
+
         row('Funnel', funnel.name);
-        row('Status', badge(funnel.status, funnel.status === 'active' ? 'success' : 'warning'));
-        row('Active steps', funnel.active_steps + ' of ' + funnel.total_steps);
-        row('Published version', funnel.published_version > 0 ? 'v' + funnel.published_version : 'not published');
-        row('Last published', formatDate(funnel.published_at));
-        row('Draft changes', funnel.has_unpublished ? badge('unpublished', 'warning') : badge('in sync', 'success'));
+        row('Status', badge(liveState, live ? 'success' : (liveState === 'paused' ? 'muted' : 'warning')));
+        row('Steps', funnel.active_steps + ' of ' + funnel.total_steps + ' shown');
+        row('Last published', funnel.published_at ? relative(funnel.published_at) : 'never');
+
+        if (funnel.has_unpublished) {
+            row('Changes', badge('not published yet', 'warning'));
+        }
 
         host.appendChild(list);
 
         var actions = el('div', 'form-group');
-        actions.appendChild(button('Open Funnel Builder', 'btn--primary btn--sm', function () {
-            window.location.hash = '#/builder';
+        actions.appendChild(button('Edit funnel', 'btn--primary btn--sm', function () {
+            Lumera.openFunnelInBuilder(funnel.id);
         }));
         host.appendChild(actions);
     }
@@ -1426,7 +1433,7 @@
     }
 
     /* ============================================================= router */
-    var ROUTES = ['dashboard', 'funnels', 'builder', 'leads', 'settings'];
+    var ROUTES = ['dashboard', 'funnels', 'leads', 'settings'];
 
     function currentRoute() {
         var hash = (window.location.hash || '').replace(/^#\/?/, '');
@@ -1465,7 +1472,7 @@
             if (error && error.message !== 'unauthenticated') { toast(error.message, 'error'); }
         });
 
-        // Deep links: #/leads/123 opens a lead, #/builder/4 opens that funnel.
+        // Deep link: #/leads/123 opens that lead directly.
         var parts = (window.location.hash || '').replace(/^#\/?/, '').split('/');
         if (route === 'leads' && parts[1]) { openLeadDetail(parts[1]); }
 
@@ -1518,16 +1525,12 @@
     Lumera.openLeadDetail = openLeadDetail;
     Lumera.navigate = navigate;
 
-    /** Switches the builder to a funnel and routes there. */
+    /**
+     * The builder is its own full-screen surface, reached only from here.
+     * There is no builder route inside this shell any more.
+     */
     Lumera.openFunnelInBuilder = function (funnelId) {
-        Lumera.funnelId = parseInt(funnelId, 10);
-
-        if (currentRoute() === 'builder') {
-            navigate();
-            return;
-        }
-
-        window.location.hash = '#/builder';
+        window.location.href = '/admin/builder.php?funnel=' + encodeURIComponent(funnelId);
     };
 
     bindChrome();
@@ -1537,6 +1540,5 @@
     // backdrop. Nothing may open a modal except an explicit user action.
     modal.close();
 
-    // funnel-builder.js registers Lumera.views.builder on the same defer queue.
     window.setTimeout(navigate, 0);
 })();

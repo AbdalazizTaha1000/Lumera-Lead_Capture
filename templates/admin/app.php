@@ -21,7 +21,7 @@ $e = static fn ($v) => Str::e((string) $v);
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Dashboard — <?= $e($company) ?></title>
-<link rel="stylesheet" href="/assets/css/admin.css?v=2">
+<link rel="stylesheet" href="/assets/css/admin.css?v=3">
 </head>
 <body class="admin-body"
       data-csrf="<?= $e($csrf) ?>"
@@ -49,10 +49,6 @@ $e = static fn ($v) => Str::e((string) $v);
             <a class="nav-item" href="#/funnels" data-route="funnels">
                 <span class="nav-item__icon" aria-hidden="true">⊞</span>
                 <span class="nav-item__label">Funnels</span>
-            </a>
-            <a class="nav-item" href="#/builder" data-route="builder">
-                <span class="nav-item__icon" aria-hidden="true">⌗</span>
-                <span class="nav-item__label">Funnel Builder</span>
             </a>
             <a class="nav-item" href="#/leads" data-route="leads">
                 <span class="nav-item__icon" aria-hidden="true">☰</span>
@@ -144,52 +140,6 @@ $e = static fn ($v) => Str::e((string) $v);
                 </div>
             </section>
 
-            <!-- --------------------------------------------------- builder -->
-            <section class="view" id="view-builder" hidden>
-                <div class="publish-bar" id="publish-bar"></div>
-
-                <div class="funnel-switcher" id="funnel-switcher"></div>
-
-                <div class="builder">
-                    <aside class="builder__list">
-                        <header class="builder__list-head">
-                            <h2 class="panel__title">Steps</h2>
-                            <button class="btn btn--sm btn--primary" type="button" id="add-step">Add Step</button>
-                        </header>
-                        <ol class="step-list" id="step-list"></ol>
-                        <p class="builder__hint">Drag a step by its handle to reorder, or use the arrows.</p>
-                    </aside>
-
-                    <section class="builder__editor" id="step-editor">
-                        <div class="empty-state">
-                            <p class="empty-state__title">Select a step</p>
-                            <p class="empty-state__text">Choose a step on the left to edit its content, settings and options.</p>
-                        </div>
-                    </section>
-                </div>
-
-                <section class="panel" id="contact-fields-panel" hidden>
-                    <header class="panel__head">
-                        <h2 class="panel__title">Contact fields</h2>
-                        <span class="panel__hint">Shown on any Contact Information step</span>
-                    </header>
-                    <div class="panel__body" id="contact-fields"></div>
-                </section>
-
-                <section class="panel">
-                    <header class="panel__head">
-                        <h2 class="panel__title">Branding</h2>
-                        <span class="panel__hint">Shown on this funnel's public page</span>
-                    </header>
-                    <div class="panel__body" id="funnel-branding"></div>
-                </section>
-
-                <section class="panel">
-                    <header class="panel__head"><h2 class="panel__title">Funnel settings</h2></header>
-                    <div class="panel__body" id="funnel-settings"></div>
-                </section>
-            </section>
-
             <!-- ----------------------------------------------------- leads -->
             <section class="view" id="view-leads" hidden>
                 <div class="panel">
@@ -240,7 +190,6 @@ $e = static fn ($v) => Str::e((string) $v);
     <?php foreach ($timezones as $timezone): ?><option value="<?= $e($timezone) ?>"><?= $e($timezone) ?></option><?php endforeach; ?>
 </template>
 
-<script src="/assets/js/admin.js?v=2" defer></script>
-<script src="/assets/js/funnel-builder.js?v=2" defer></script>
+<script src="/assets/js/admin.js?v=3" defer></script>
 </body>
 </html>
