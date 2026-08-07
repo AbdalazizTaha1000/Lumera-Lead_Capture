@@ -10,8 +10,14 @@ declare(strict_types=1);
  *      honeypot, minimum completion time, single-use submission token)
  *   2. CSRF
  *   3. authoritative validation against the PUBLISHED snapshot
- *   4. persist the lead + answers in one transaction
- *   5. attempt the SMTP notification — a failure here never loses the lead
+ *   4. persist the lead + answers in ONE transaction
+ *   5. re-read the committed row and verify it before responding
+ *   6. attempt the SMTP notification and webhook — failures there never affect
+ *      the outcome reported to the visitor, and never lose the lead
+ *
+ * Success is reported only after the transaction has committed AND the stored
+ * lead has been read back with the expected number of answers. No other branch
+ * in this file may answer with success.
  */
 
 require dirname(__DIR__, 3) . '/vendor/autoload.php';
@@ -66,9 +72,19 @@ if (!Csrf::validate(Csrf::fromRequest($payload), 'public')) {
 $honeypot = $payload['company_website'] ?? '';
 
 if (is_string($honeypot) && trim($honeypot) !== '') {
-    // Silently accept so the bot does not learn it was detected.
-    Logger::warning('submit.honeypot_triggered', ['ip_hash' => Request::ipHash()]);
-    Response::success(['lead_id' => null, 'duplicate' => false]);
+    // This branch used to answer 200 with `lead_id: null` so a bot would not
+    // learn it had been detected. That silently discarded genuine submissions
+    // whenever the field was filled by browser autofill or a password manager,
+    // and the visitor still saw the Thank You screen.
+    //
+    // Nothing may report success without a stored lead. A rejection here is a
+    // recoverable error, so a real person can correct it and resubmit.
+    Logger::warning('submit.honeypot_triggered', [
+        'request_id' => Logger::requestId(),
+        'ip_hash'    => Request::ipHash(),
+    ]);
+
+    Response::error('We could not submit your request. Please try again.', 422);
 }
 
 // ------------------------------------------------- single-use submit token --
@@ -107,13 +123,26 @@ if ($snapshot === null || ($snapshot['steps'] ?? []) === []) {
 }
 
 // ------------------------------------------------- minimum completion time --
+// Structured diagnostic trail. Carries no secrets: the IP is a keyed hash and
+// no credential, phone number or raw address is ever placed in it.
+$trail = [
+    'request_id'        => Logger::requestId(),
+    'funnel_id'         => (int) $funnel['id'],
+    'funnel_slug'       => (string) $funnel['slug'],
+    'published_version' => (int) ($snapshot['version'] ?? 0),
+    // Not named "token": the log redactor masks any key containing that word,
+    // and this records only the verification RESULT, never the token itself.
+    'submission_verified' => true,
+    'ip_hash'           => Request::ipHash(),
+];
+
 $minSeconds = (int) ($snapshot['funnel']['min_completion_seconds'] ?? 0);
 $elapsed    = SubmissionToken::elapsed((int) ($token['issued_at'] ?? 0));
 
 // A null elapsed means the issue time is unknown; 0 means the form came back
 // instantly, which is the case this guard exists for.
 if ($minSeconds > 0 && $elapsed !== null && $elapsed < $minSeconds) {
-    Logger::warning('submit.too_fast', ['elapsed' => $elapsed, 'required' => $minSeconds]);
+    Logger::warning('submit.too_fast', $trail + ['elapsed' => $elapsed, 'required' => $minSeconds]);
     Response::error('Please take a moment to review your answers before submitting.', 422);
 }
 
@@ -124,8 +153,11 @@ $answers  = is_array($payload['answers'] ?? null) ? $payload['answers'] : [];
 $validator = new SubmissionValidator();
 
 if (!$validator->validate($snapshot, $answers, $language)) {
+    Logger::info('submit.validation_failed', $trail + ['fields' => array_keys($validator->errors())]);
     Response::validationError($validator->errors());
 }
+
+$trail['validation'] = 'passed';
 
 // -------------------------------------------------- duplicate protection --
 $leadService = new LeadService();
@@ -138,13 +170,19 @@ $duplicate = $leadService->findRecentDuplicate(
 );
 
 if ($duplicate !== null) {
-    Logger::info('submit.duplicate_suppressed', ['existing_lead_id' => (int) $duplicate['id']]);
+    // Only reported as success because the row genuinely exists and is visible
+    // to the admin — findRecentDuplicate() excludes soft-deleted leads.
+    $trail['duplicate_of'] = (int) $duplicate['id'];
+    $trail['lead_id']      = (int) $duplicate['id'];
+    $trail['outcome']      = 'duplicate_suppressed';
 
-    // Treat as success: the visitor's data is already safely stored.
+    Logger::info('submit.duplicate_suppressed', $trail);
+
     Response::success([
         'lead_id'   => (int) $duplicate['id'],
         'duplicate' => true,
-        'success'   => publicSuccessBlock($snapshot, $language, $funnelService),
+        'message'   => 'Lead submitted successfully.',
+        'screen'    => publicSuccessBlock($snapshot, $language, $funnelService),
     ]);
 }
 
@@ -154,8 +192,15 @@ if ($duplicate !== null) {
 $burn = SubmissionToken::consume($submissionToken);
 
 if (!$burn['ok']) {
+    $trail['outcome'] = 'token_already_used';
+    Logger::warning('submit.token_replay', $trail);
+
     Response::error('This form has already been submitted.', 409);
 }
+
+$expectedAnswers = count($validator->answers());
+$trail['expected_answers'] = $expectedAnswers;
+$trail['transaction']      = 'started';
 
 try {
     $context = $leadService->contextFromPayload($payload);
@@ -168,39 +213,74 @@ try {
         $validator->consentGiven()
     );
 } catch (Throwable $e) {
-    Logger::error('submit.store_failed', ['message' => $e->getMessage()]);
-    Response::error('We could not save your details. Please try again.', 500);
+    // store() runs inside a transaction that rolls back on any exception, so
+    // nothing partial survives. The visitor must see a failure, never success.
+    $trail['transaction'] = 'rolled_back';
+    $trail['outcome']     = 'store_failed';
+    $trail['error']       = $e->getMessage();
+
+    Logger::error('submit.store_failed', $trail);
+
+    // Nothing was stored, so the visitor must be able to submit again.
+    SubmissionToken::release($submissionToken);
+
+    Response::error('We could not submit your request. Please try again.', 500);
 }
 
-Logger::info('lead.created', [
-    'lead_id'        => $leadId,
-    'funnel_id'      => (int) $funnel['id'],
-    'funnel_version' => (int) ($snapshot['version'] ?? 0),
-    'score'          => $validator->score(),
-]);
+$trail['transaction'] = 'committed';
+$trail['lead_id']     = $leadId;
 
-// ------------------------------------------------------------ notification --
-// Delivery is best-effort. The lead is already committed; a mail failure is
-// recorded on the lead for admin review and never surfaces to the visitor.
+// --------------------------------------------- post-commit verification --
+// The response contract requires proof, not optimism: re-read the committed
+// row and its answers on a fresh query before anything is reported as success.
 $leadRepo = new LeadRepository();
-$lead     = $leadRepo->find($leadId) ?? [];
-$answers  = $leadRepo->answers($leadId);
+$lead     = $leadRepo->find($leadId);
+$answers  = $lead !== null ? $leadRepo->answers($leadId) : [];
 
+$trail['answers_inserted'] = count($answers);
+
+if ($leadId <= 0 || $lead === null || count($answers) !== $expectedAnswers) {
+    $trail['outcome'] = 'persistence_unverified';
+
+    Logger::error('submit.persistence_unverified', $trail);
+
+    SubmissionToken::release($submissionToken);
+
+    Response::error('We could not submit your request. Please try again.', 500);
+}
+
+$trail['persistence'] = 'verified';
+
+// From here the lead is durably stored. Everything below is a side effect and
+// may fail freely without affecting the outcome reported to the visitor.
 $lead['funnel_name'] = (string) $funnel['name'];
 
+// ------------------------------------------------------------ notification --
+// Delivery is best-effort: a mail failure is recorded on the lead for admin
+// review and never surfaces to the visitor.
 try {
     $result = (new LeadNotification())->send($lead, $answers, $funnel);
 
     if ($result['ok']) {
         $leadService->markEmailSent($leadId);
+        $trail['email'] = 'sent';
     } elseif (!empty($result['skipped'])) {
         $leadService->markEmailSkipped($leadId, (string) ($result['error'] ?? 'skipped'));
+        $trail['email'] = 'skipped';
     } else {
         $leadService->markEmailFailed($leadId, (string) ($result['error'] ?? 'unknown error'));
+        $trail['email'] = 'failed';
     }
 } catch (Throwable $e) {
-    $leadService->markEmailFailed($leadId, 'Notification exception.');
-    Logger::error('submit.notification_exception', ['lead_id' => $leadId, 'message' => $e->getMessage()]);
+    $trail['email'] = 'exception';
+
+    try {
+        $leadService->markEmailFailed($leadId, 'Notification exception.');
+    } catch (Throwable) {
+        // Recording the failure must not itself break the response.
+    }
+
+    Logger::error('submit.notification_exception', $trail + ['error' => $e->getMessage()]);
 }
 
 // ---------------------------------------------------------------- webhook --
@@ -209,19 +289,29 @@ try {
 if ((int) ($funnel['webhook_enabled'] ?? 0) === 1 && (string) ($funnel['webhook_url'] ?? '') !== '') {
     try {
         $webhook = new WebhookService();
-        $webhook->send(
+        $delivery = $webhook->send(
             (string) $funnel['webhook_url'],
             $webhook->buildPayload($funnel, $lead, $answers)
         );
+        $trail['webhook'] = $delivery['ok'] ? 'delivered' : 'failed';
     } catch (Throwable $e) {
-        Logger::error('submit.webhook_exception', ['lead_id' => $leadId, 'message' => $e->getMessage()]);
+        $trail['webhook'] = 'exception';
+        Logger::error('submit.webhook_exception', $trail + ['error' => $e->getMessage()]);
     }
+} else {
+    $trail['webhook'] = 'disabled';
 }
+
+$trail['outcome']     = 'persisted';
+$trail['http_status'] = 200;
+
+Logger::info('lead.created', $trail);
 
 Response::success([
     'lead_id'   => $leadId,
     'duplicate' => false,
-    'success'   => publicSuccessBlock($snapshot, $language, $funnelService),
+    'message'   => 'Lead submitted successfully.',
+    'screen'    => publicSuccessBlock($snapshot, $language, $funnelService),
 ]);
 
 /**

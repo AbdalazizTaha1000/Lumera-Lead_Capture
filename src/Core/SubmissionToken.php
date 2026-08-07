@@ -100,6 +100,32 @@ final class SubmissionToken
     }
 
     /**
+     * Un-burns a token.
+     *
+     * The token is consumed just before the insert so a double submit cannot
+     * race, but if the insert then fails the visitor must be able to retry —
+     * otherwise they are locked out with no lead stored. Only a genuinely
+     * persisted lead leaves the token spent.
+     */
+    public static function release(?string $token): void
+    {
+        Session::start();
+
+        if (!is_string($token) || $token === '') {
+            return;
+        }
+
+        $tokens = self::tokens();
+
+        if (!isset($tokens[$token])) {
+            return;
+        }
+
+        $tokens[$token]['used'] = false;
+        Session::set(self::KEY, $tokens);
+    }
+
+    /**
      * Seconds elapsed since the token was issued.
      *
      * Returns null when the issue time is unknown, so the caller can tell

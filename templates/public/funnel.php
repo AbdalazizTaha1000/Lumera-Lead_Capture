@@ -129,10 +129,14 @@ $pageTitle = $tagline !== '' ? $companyName . ' — ' . $tagline : $companyName;
 
             <p class="step__error" id="step-error" role="alert" hidden></p>
 
-            <!-- Honeypot: hidden from humans, tempting to bots. -->
+            <!-- Honeypot: hidden from humans, tempting to bots.
+                 No <label>, a neutral name and explicit password-manager opt-outs:
+                 a field called "company website" with a label attached is exactly
+                 what browser autofill and password managers fill in, which used to
+                 turn a genuine submission into a silent rejection. -->
             <div class="hp-field" aria-hidden="true">
-                <label for="company_website">Company website</label>
-                <input type="text" id="company_website" name="company_website" tabindex="-1" autocomplete="off">
+                <input type="text" id="hp-contact-ref" name="hp-contact-ref" tabindex="-1"
+                       autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other">
             </div>
 
             <div class="step__actions">

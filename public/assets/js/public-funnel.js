@@ -118,7 +118,7 @@
         wordmark: document.querySelector('.funnel__wordmark'),
         logo: document.querySelector('.funnel__logo'),
         brand: document.querySelector('.funnel__brand'),
-        honeypot: document.getElementById('company_website')
+        honeypot: document.getElementById('hp-contact-ref')
     };
 
     /* ------------------------------------------------------------- helpers */
@@ -873,16 +873,34 @@
             credentials: 'same-origin',
             body: JSON.stringify(payload)
         }).then(function (response) {
-            return response.json().then(function (data) { return { status: response.status, data: data }; });
+            return response.json()
+                .catch(function () { return null; })
+                .then(function (data) {
+                    return { ok: response.ok, status: response.status, data: data };
+                });
         }).then(function (result) {
-            if (result.data && result.data.ok) {
+            var data = result.data;
+            var leadId = data ? Number(data.lead_id) : NaN;
+
+            // The Thank You screen requires PROOF of persistence, never the
+            // mere presence of a JSON body: a 2xx status, an explicit
+            // success flag, and a real lead id the server committed.
+            var persisted = result.ok
+                && !!data
+                && data.success === true
+                && !isNaN(leadId)
+                && leadId > 0;
+
+            if (persisted) {
                 sessionRemove(storageKey('answers'));
-                showSuccess(result.data.success || {});
+                showSuccess(data.screen || {});
                 return;
             }
 
             handleSubmitFailure(result);
         }).catch(function () {
+            // Network or parse failure: nothing was confirmed, so nothing is
+            // celebrated. The answers stay put and the visitor can retry.
             resetSubmitButton();
             showStepError(t('generic_error'));
         });
@@ -908,11 +926,15 @@
             return;
         }
 
-        showStepError(data.error || t('generic_error'));
+        showStepError(data.message || data.error || t('generic_error'));
 
-        // An expired session or a consumed token needs a fresh page load.
-        if (result.status === 419 || result.status === 409) {
-            refreshSession();
+        // An expired session or a consumed token needs fresh tokens before the
+        // visitor can retry. The answers they already gave are untouched.
+        if (result.status === 419 || result.status === 409 || result.status >= 500) {
+            refreshSession().then(function () {
+                // Re-arm the submit button with the refreshed token in place.
+                resetSubmitButton();
+            });
         }
     }
 

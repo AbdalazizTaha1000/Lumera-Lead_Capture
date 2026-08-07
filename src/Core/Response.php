@@ -43,22 +43,37 @@ final class Response
         exit;
     }
 
-    /** @param array<string,mixed> $data */
+    /**
+     * Every response carries an explicit outcome flag.
+     *
+     * `success` is the contract clients must check; `ok` is kept as its alias so
+     * existing callers keep working. A client must never infer success from the
+     * mere presence of JSON — see public-funnel.js, which requires the HTTP
+     * status, `success === true` and a usable payload before it shows anything.
+     *
+     * @param array<string,mixed> $data
+     */
     public static function success(array $data = [], int $status = 200): never
     {
-        self::json(['ok' => true] + $data, $status);
+        self::json(['ok' => true, 'success' => true] + $data, $status);
     }
 
     /** @param array<string,mixed> $extra */
     public static function error(string $message, int $status = 400, array $extra = []): never
     {
-        self::json(['ok' => false, 'error' => $message] + $extra, $status);
+        self::json(['ok' => false, 'success' => false, 'error' => $message, 'message' => $message] + $extra, $status);
     }
 
     /** @param array<string,string> $errors field => message */
     public static function validationError(array $errors, string $message = 'Please correct the highlighted fields.'): never
     {
-        self::json(['ok' => false, 'error' => $message, 'errors' => $errors], 422);
+        self::json([
+            'ok'      => false,
+            'success' => false,
+            'error'   => $message,
+            'message' => $message,
+            'errors'  => $errors,
+        ], 422);
     }
 
     public static function redirect(string $url, int $status = 302): never

@@ -141,9 +141,14 @@ final class LeadRepository
             return null;
         }
 
+        // Soft-deleted leads are excluded: reporting "already submitted" against
+        // an archived lead would tell the visitor their details were captured
+        // while the admin sees nothing.
         return Database::selectOne(
             'SELECT `id`, `submitted_at` FROM `leads`
-             WHERE `submission_hash` = :h AND `submitted_at` >= (NOW() - INTERVAL :w SECOND)
+             WHERE `submission_hash` = :h
+               AND `deleted_at` IS NULL
+               AND `submitted_at` >= (NOW() - INTERVAL :w SECOND)
              ORDER BY `id` DESC LIMIT 1',
             ['h' => $submissionHash, 'w' => $windowSeconds]
         );
