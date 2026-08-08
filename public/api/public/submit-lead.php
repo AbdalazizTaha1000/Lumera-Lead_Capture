@@ -31,6 +31,7 @@ use Lumera\Core\SubmissionToken;
 use Lumera\Mail\LeadNotification;
 use Lumera\Repositories\FunnelRepository;
 use Lumera\Repositories\LeadRepository;
+use Lumera\Services\AnalyticsService;
 use Lumera\Services\FunnelService;
 use Lumera\Services\LeadService;
 use Lumera\Services\WebhookService;
@@ -254,6 +255,18 @@ $trail['persistence'] = 'verified';
 // From here the lead is durably stored. Everything below is a side effect and
 // may fail freely without affecting the outcome reported to the visitor.
 $lead['funnel_name'] = (string) $funnel['name'];
+
+// ---------------------------------------------------------------- analytics --
+// Attaches the visitor's session to the committed lead and emits the
+// server-only lead_created event. Wrapped: tracking must never disturb a lead
+// that is already stored.
+try {
+    (new AnalyticsService())->linkLead($funnel, $leadId);
+    $trail['analytics'] = 'linked';
+} catch (Throwable $e) {
+    $trail['analytics'] = 'failed';
+    Logger::warning('submit.analytics_link_failed', ['lead_id' => $leadId, 'message' => $e->getMessage()]);
+}
 
 // ------------------------------------------------------------ notification --
 // Delivery is best-effort: a mail failure is recorded on the lead for admin

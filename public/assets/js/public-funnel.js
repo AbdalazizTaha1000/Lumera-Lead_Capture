@@ -210,6 +210,125 @@
         return stored;
     }
 
+    /* ------------------------------------------------------------ analytics */
+    /**
+     * Funnel instrumentation.
+     *
+     * Fire-and-forget by construction: sendBeacon when available, keepalive
+     * fetch otherwise, and every call swallows its own errors. Nothing here is
+     * awaited, so a slow or failing tracker cannot delay a step transition or a
+     * lead submission. No answer value is ever sent — only step keys, which are
+     * the funnel's own identifiers.
+     */
+    var track = {
+        started: {},
+        endpoint: '/api/public/analytics.php',
+
+        context: function () {
+            var attribution = sessionRead('lumera_attribution', {}) || {};
+
+            return {
+                utm_source: attribution.utm_source || null,
+                utm_medium: attribution.utm_medium || null,
+                utm_campaign: attribution.utm_campaign || null,
+                utm_content: attribution.utm_content || null,
+                utm_term: attribution.utm_term || null,
+                referrer: attribution.referrer || document.referrer || null,
+                landing_path: attribution.landing_page || window.location.href,
+                language: state.lang,
+                timezone: (function () {
+                    try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return null; }
+                })()
+            };
+        },
+
+        send: function (event, extra) {
+            if (state.preview) { return; }
+
+            var payload = {
+                funnel_slug: state.slug,
+                event: event,
+                context: this.context()
+            };
+
+            if (extra) {
+                Object.keys(extra).forEach(function (k) { payload[k] = extra[k]; });
+            }
+
+            var body = JSON.stringify(payload);
+
+            try {
+                if (navigator.sendBeacon) {
+                    // text/plain keeps the beacon a simple request: no preflight.
+                    var blob = new Blob([body], { type: 'text/plain;charset=UTF-8' });
+                    if (navigator.sendBeacon(this.endpoint, blob)) { return; }
+                }
+
+                fetch(this.endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    keepalive: true,
+                    body: body
+                }).catch(function () { /* tracking must never surface */ });
+            } catch (e) { /* tracking must never surface */ }
+        },
+
+        view: function () {
+            this.send('session_start');
+            this.send('funnel_view');
+        },
+
+        stepView: function (step, position) {
+            this.send('step_view', { step_key: step.key, step_position: position });
+        },
+
+        /** First interaction with a step, sent once per step per session. */
+        stepStart: function (step) {
+            if (this.started[step.key]) { return; }
+            this.started[step.key] = true;
+            this.send('step_start', { step_key: step.key });
+        },
+
+        stepComplete: function (step) {
+            this.send('step_complete', { step_key: step.key });
+        },
+
+        stepBack: function (step) {
+            this.send('step_back', { step_key: step.key });
+        },
+
+        /** Category only — never the value the visitor typed. */
+        error: function (step, reason) {
+            this.send('validation_error', {
+                step_key: step.key,
+                reason: reason || 'invalid'
+            });
+        },
+
+        complete: function () {
+            this.send('funnel_complete');
+        }
+    };
+
+    /** Maps a client-side message to a bounded error category. */
+    function errorCategory(step, message) {
+        var text = String(message || '').toLowerCase();
+
+        if (step.type === 'consent') { return 'consent_required'; }
+        if (step.type === 'single_select' || step.type === 'multi_select' || step.type === 'dropdown') {
+            return 'select_required';
+        }
+        if (text.indexOf('email') !== -1) { return 'invalid_email'; }
+        if (text.indexOf('phone') !== -1) { return 'invalid_phone'; }
+        if (text.indexOf('number') !== -1) { return 'invalid_number'; }
+        if (text.indexOf('at least') !== -1) { return 'min_length'; }
+        if (text.indexOf('no more than') !== -1) { return 'max_length'; }
+        if (text.indexOf('format') !== -1) { return 'pattern'; }
+
+        return 'required';
+    }
+
     /* ------------------------------------------------------ step visibility */
     /**
      * Applies the optional conditional-logic rule of each step.
@@ -368,6 +487,8 @@
 
         updateProgress(steps);
 
+        track.stepView(step, state.index + 1);
+
         var focusable = el.container.querySelector('input, select, textarea, button');
         if (focusable && window.innerWidth > 700) { focusable.focus(); }
     }
@@ -434,6 +555,8 @@
             button.appendChild(element('span', 'option__label', localized(option.label)));
 
             button.addEventListener('click', function () {
+                track.stepStart(step);
+
                 if (multi) {
                     var list = Array.isArray(state.answers[step.key]) ? state.answers[step.key].slice() : [];
                     var at = list.indexOf(option.value);
@@ -487,6 +610,7 @@
         });
 
         select.addEventListener('change', function () {
+            track.stepStart(step);
             state.answers[step.key] = select.value;
             persistAnswers();
             hideStepError();
@@ -516,6 +640,7 @@
         }
 
         input.addEventListener('input', function () {
+            track.stepStart(step);
             state.answers[step.key] = input.value;
             persistAnswers();
             hideStepError();
@@ -534,6 +659,7 @@
         input.id = 'field-' + step.key;
 
         input.addEventListener('change', function () {
+            track.stepStart(step);
             state.answers[step.key] = input.checked;
             label.classList.toggle('is-selected', input.checked);
             persistAnswers();
@@ -655,6 +781,7 @@
     }
 
     function storeContact(step, key, value) {
+        track.stepStart(step);
         var current = state.answers[step.key] || {};
         current[key] = value;
         state.answers[step.key] = current;
@@ -792,11 +919,13 @@
         var error = validateStep(step);
 
         if (error) {
+            track.error(step, errorCategory(step, error));
             showStepError(error);
             return;
         }
 
         hideStepError();
+        track.stepComplete(step);
 
         if (state.index === steps.length - 1) {
             submit();
@@ -811,6 +940,10 @@
 
     function goBack() {
         if (state.index === 0) { return; }
+
+        var steps = visibleSteps();
+        if (steps[state.index]) { track.stepBack(steps[state.index]); }
+
         state.index -= 1;
         persistAnswers();
         render();
@@ -892,6 +1025,10 @@
                 && leadId > 0;
 
             if (persisted) {
+                // Only after the server confirms the lead was stored. The
+                // authoritative completion is recorded server-side when the
+                // lead is linked; this event records the client's view of it.
+                track.complete();
                 sessionRemove(storageKey('answers'));
                 showSuccess(data.screen || {});
                 return;
@@ -910,6 +1047,11 @@
         resetSubmitButton();
 
         var data = result.data || {};
+        var currentSteps = visibleSteps();
+
+        if (currentSteps[state.index]) {
+            track.error(currentSteps[state.index], data.errors ? 'invalid' : 'server');
+        }
 
         if (data.errors) {
             var steps = visibleSteps();
@@ -1045,6 +1187,11 @@
                 applyBranding();
                 restoreAnswers();
                 applyDirection();
+
+                // Before the first render, so the recorded timeline opens with
+                // the visit rather than with the first step it happened to show.
+                // sendBeacon only queues, so this costs the paint nothing.
+                track.view();
                 render();
             })
             .catch(function () {

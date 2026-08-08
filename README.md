@@ -38,6 +38,7 @@ framework, no frontend build step.
 26. [Security notes](#26-security-notes)
 27. [Backup guidance](#27-backup-guidance)
 28. [Troubleshooting](#28-troubleshooting)
+29. [Funnel analytics](#29-funnel-analytics)
 
 ---
 
@@ -91,30 +92,33 @@ lumera-lead-capture/
 │   │   ├── login.php             sign-in page
 │   │   └── preview.php           draft preview (auth required)
 │   ├── api/
-│   │   ├── public/               session.php · funnel.php · submit-lead.php
+│   │   ├── public/               session.php · funnel.php · submit-lead.php ·
+│   │   │                         analytics.php (tracking beacons)
 │   │   └── admin/                login · logout · dashboard · funnels · funnel ·
 │   │                             steps · options · contact-fields · publish ·
 │   │                             leads · lead-details · lead-status ·
 │   │                             lead-notes · export · settings · upload
 │   └── assets/
 │       ├── css/                  public.css · admin.css
-│       ├── js/                   public-funnel.js · admin.js · funnel-builder.js
+│       ├── js/                   public-funnel.js · admin.js · builder.js · qr.js
 │       └── uploads/              user uploads (script execution disabled)
 ├── src/                        ← never web-accessible
 │   ├── Core/                     App, Config, Database, Router, Session, Auth,
 │   │                             Csrf, Logger, Response, RateLimiter,
 │   │                             AuditLog, SubmissionToken, AdminEndpoint
 │   ├── Repositories/             Funnel, Step, Option, ContactField, Version,
-│   │                             Lead, Settings, AdminUser
+│   │                             Lead, Settings, AdminUser, Analytics
 │   ├── Services/                 Funnel, FunnelManager, Publish, Lead,
-│   │                             Webhook, Export, Upload, Dashboard
+│   │                             Webhook, Export, Upload, Dashboard, Analytics
 │   ├── Validators/               SubmissionValidator, StepValidator
 │   ├── Mail/                     Mailer (PHPMailer/SMTP), LeadNotification
-│   └── Support/                  Request, Str, Phone, StepType, SvgSanitizer
+│   └── Support/                  Request, Str, Phone, StepType, SvgSanitizer,
+│                                 UserAgent, TrafficSource, Geo
 ├── database/                     schema.sql · seed.sql · migrations/
 ├── storage/                      logs/ · cache/ · rate-limit/
 ├── templates/                    public/ · admin/ · email/
-├── bin/console.php               CLI: install, admin:create, funnel:publish…
+├── bin/console.php               CLI: install, admin:create, funnel:publish,
+│                                 analytics:rollup, analytics:prune…
 ├── vendor/                       Composer dependencies
 ├── .env                          secrets — never committed
 ├── .env.example
@@ -241,6 +245,13 @@ LOGIN_RATE_LIMIT_WINDOW_SECONDS=900
 
 STORE_RAW_IP=false
 LOG_PATH=/var/www/lumera-lead-capture/storage/logs
+
+ANALYTICS_ENABLED=true
+ANALYTICS_HASH_SALT=<64-character random hex>
+ANALYTICS_SESSION_TIMEOUT_MINUTES=30
+ANALYTICS_RAW_RETENTION_DAYS=90
+ANALYTICS_RATE_LIMIT_MAX=300
+ANALYTICS_RATE_LIMIT_WINDOW=600
 ```
 
 Notes:
@@ -251,6 +262,14 @@ Notes:
 * `LEAD_RECIPIENT_EMAIL` accepts a comma-separated list.
 * `STORE_RAW_IP=false` is the privacy-preserving default; only a keyed hash is
   stored.
+* `ANALYTICS_HASH_SALT` keys the one-way visitor hash. Generate it with
+  `php bin/console.php key:generate`. It is server-only and is never sent to a
+  browser. Rotating it retires every existing visitor identity, which is the
+  intended way to reset attribution.
+* `ANALYTICS_ENABLED=false` switches the engine off completely: the tracking
+  endpoint stops recording, the maintenance commands become no-ops, and existing
+  data is still reported. Lead capture is unaffected either way.
+* Analytics retention is covered in [section 29](#29-funnel-analytics).
 * `.env` is in `.gitignore`. **Never commit it.**
 
 ---
@@ -1046,6 +1065,15 @@ secret.
 stored only if you explicitly set `STORE_RAW_IP=true`, and is withheld from the
 API and the CSV export otherwise.
 
+**Analytics** — the tracking endpoint is the only public write surface besides
+lead submission, and it is deliberately narrow: allow-listed event names, a
+4 KB payload ceiling, a per-IP rate limit, and no response body. Visitor
+identity is a one-way HMAC keyed by `ANALYTICS_HASH_SALT`; no raw IP, no
+user-agent string and no fingerprint is stored, and no answer value can reach an
+event row. `lead_created` cannot be sent by a browser, and completion is set
+server-side only after a lead is verified as stored. Raw event tables are never
+exposed publicly. See [section 29](#29-funnel-analytics).
+
 ---
 
 ## 27. Backup guidance
@@ -1081,6 +1109,9 @@ Housekeeping — prune expired rate-limit windows and old login attempts:
 ```cron
 30 3 * * * cd /var/www/lumera-lead-capture && php bin/console.php prune
 ```
+
+The analytics tables have their own schedule; see
+[section 29](#29-funnel-analytics).
 
 ---
 
@@ -1197,3 +1228,102 @@ php bin/console.php funnel:status
 curl -s https://go.lumeradubai.com/api/public/funnel.php | head -c 400
 curl -s -o /dev/null -w '%{http_code}\n' https://go.lumeradubai.com/.env    # must be 403
 ```
+
+---
+
+## 29. Funnel analytics
+
+Analytics is a separate subsystem. It has its own three tables and touches
+neither `leads` nor `lead_answers`; a lead is stored the same way whether the
+engine is on, off, or broken.
+
+### What is measured
+
+**Funnel Builder → Analytics** (or the **Analytics** button on a row in
+**Admin → Funnels**) reports, per funnel and per date range:
+
+* **Visitors** — distinct people, counted by a one-way hash.
+* **Sessions** and **views** — visits, and how many times the funnel loaded.
+* **Leads** — the real lead count, plus how many were matched to a tracked
+  visit.
+* **Conversion rate** — matched leads per session.
+* **Completion rate** — completions per session that actually started
+  answering.
+* **Average completion time**.
+* **Funnel drop-off** — per step: people who reached it, started it, completed
+  it, went back, hit a validation error, and were lost.
+* **Traffic sources, campaigns, referrers, devices, browsers, operating
+  systems, countries and cities**.
+* **All funnels** — the same range across every funnel, for comparison.
+
+The **Dashboard** carries the site-wide headline: Visitors, Leads, Conversion
+rate, Completion rate and New / unhandled, over the last 30 days.
+
+### What is deliberately not measured
+
+* No raw IP addresses. The visitor identity is `HMAC-SHA256(ip + user-agent)`
+  under `ANALYTICS_HASH_SALT`; the raw values are never written.
+* No fingerprinting. No canvas, no font enumeration, no hardware identifiers,
+  no browser entropy beyond the user-agent string the browser already sends.
+* No answers. A tracking event carries a step key and, for a validation error,
+  a category such as `invalid_email` — never a value the visitor typed. Free
+  text in a client-supplied reason is collapsed to a known category, and event
+  metadata is filtered to a fixed key list.
+* No outbound requests. Country and city come only from a proxy or GeoIP header
+  if your host sets one, and are left blank otherwise. There is no per-view
+  lookup and no third-party SDK.
+
+### How trust is arranged
+
+The browser names an event and a step key. Everything else is resolved by the
+server from the published snapshot: the funnel, its version, the step id and
+the step position. A step key that is not in the published snapshot is
+rejected. `lead_created` and `funnel_abandon` cannot be sent from a browser at
+all, and a `funnel_complete` beacon is recorded but never marks a session
+complete — completion is set server-side once a lead has been verified as
+stored, so the completion rate cannot be inflated from the client.
+
+Known crawlers and headless browsers are flagged and excluded from every
+report. They are still allowed to submit leads; classification affects
+reporting only.
+
+### Honesty about gaps
+
+Metrics that were never measured are reported as unknown, not as zero. A range
+with no traffic shows an em dash for its rates, and the days before you deployed
+the engine are marked lead-only: their lead count is real, and their traffic is
+left blank rather than drawn as a flat line at zero.
+
+### Maintenance
+
+Two commands, both idempotent:
+
+```bash
+php bin/console.php analytics:rollup [days]   # default 7
+php bin/console.php analytics:prune
+```
+
+`analytics:rollup` closes sessions that went quiet past
+`ANALYTICS_SESSION_TIMEOUT_MINUTES` (recording them as abandoned) and rebuilds
+the daily rollup rows. `analytics:prune` deletes raw events older than
+`ANALYTICS_RAW_RETENTION_DAYS`; sessions, rollups and leads are never touched,
+so summary reporting stays exact for all time while the event timeline — and so
+the per-step figures — covers the retention window.
+
+Recommended schedule:
+
+```cron
+*/15 * * * * cd /var/www/lumera-lead-capture && php bin/console.php analytics:rollup 2
+15   3 * * * cd /var/www/lumera-lead-capture && php bin/console.php analytics:rollup 40
+45   3 * * * cd /var/www/lumera-lead-capture && php bin/console.php analytics:prune
+```
+
+The frequent run keeps abandonment current; the nightly run backfills a wider
+window in case the machine was down.
+
+### Turning it off
+
+Set `ANALYTICS_ENABLED=false`. The tracking endpoint stops recording and answers
+normally, the two commands become no-ops, and the admin UI says collection is
+switched off while still showing whatever was recorded before. Nothing about the
+public funnel, lead capture, notifications or webhooks changes.

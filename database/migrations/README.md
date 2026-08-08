@@ -12,6 +12,18 @@ console tool:
 `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` (only if that account does not
 already exist), and publishes funnel version 1.
 
+## New tables
+
+Tables introduced after the initial release live **only** in a migration file,
+not in `schema.sql`. `install` runs `schema.sql` and then every migration, and
+each migration is written with `CREATE TABLE IF NOT EXISTS`, so a fresh install
+and an upgrade converge on the same structure without maintaining the
+definition in two places.
+
+`2026_08_08_analytics_engine.sql` adds `analytics_sessions`,
+`analytics_events` and `analytics_daily_rollups`. It creates no column on
+`leads` and holds only nullable `ON DELETE SET NULL` pointers to it.
+
 ## Adding a change later
 
 Create a numbered file in this directory and apply it with the MySQL client:

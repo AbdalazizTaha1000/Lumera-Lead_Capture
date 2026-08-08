@@ -470,7 +470,7 @@
         actions: function () { return []; },
         render: function () {
             return api('/api/admin/dashboard.php').then(function (data) {
-                renderStats(data.stats);
+                renderStats(data.stats, data.traffic);
                 renderLatest(data.latest);
                 renderFunnelStatus(data.funnel);
 
@@ -489,14 +489,40 @@
         return card;
     }
 
-    function renderStats(stats) {
+    /**
+     * A rate with no denominator behind it is unknown, not zero, and is drawn
+     * as an em dash. Nothing here manufactures a percentage.
+     */
+    function ratio(value) {
+        return (value === null || value === undefined) ? '—' : Number(value).toFixed(1) + '%';
+    }
+
+    function count(value) {
+        return (value === null || value === undefined) ? '—' : Number(value).toLocaleString();
+    }
+
+    function renderStats(stats, traffic) {
         var grid = $('#stat-grid');
         clear(grid);
 
-        grid.appendChild(statCard('Total leads', stats.total, 'All time'));
-        grid.appendChild(statCard('Today', stats.today, 'Since midnight'));
-        grid.appendChild(statCard('This week', stats.week, 'Last 7 days'));
-        grid.appendChild(statCard('This month', stats.month, 'Last 30 days'));
+        traffic = traffic || { available: false };
+
+        var window30 = 'Last ' + (traffic.days || 30) + ' days';
+        var untracked = 'Visitor tracking not recorded yet';
+
+        grid.appendChild(statCard('Visitors', count(traffic.visitors),
+            traffic.available ? window30 + ' · ' + count(traffic.sessions) + ' sessions' : untracked));
+
+        // Lead counts are exact and never depend on analytics being present.
+        grid.appendChild(statCard('Leads', stats.total,
+            'All time · ' + stats.today + ' today · ' + stats.month + ' this month'));
+
+        grid.appendChild(statCard('Conversion rate', ratio(traffic.conversion_rate),
+            traffic.available ? 'Tracked leads per visit' : untracked));
+
+        grid.appendChild(statCard('Completion rate', ratio(traffic.completion_rate),
+            traffic.available ? 'Of visitors who started' : untracked));
+
         grid.appendChild(statCard('New / unhandled', stats.new_leads, 'Status: new'));
 
         if (stats.email_failures > 0) {
@@ -685,6 +711,12 @@
 
             group.appendChild(button('Edit', 'btn--ghost btn--sm', function () {
                 Lumera.openFunnelInBuilder(funnel.id);
+            }));
+
+            // Analytics lives inside the builder — this is a deep link to that
+            // one implementation, not a second copy of it.
+            group.appendChild(button('Analytics', 'btn--ghost btn--sm', function () {
+                Lumera.openFunnelAnalytics(funnel.id);
             }));
 
             var openLink = el('a', 'btn btn--ghost btn--sm', 'Open');
@@ -1531,6 +1563,11 @@
      */
     Lumera.openFunnelInBuilder = function (funnelId) {
         window.location.href = '/admin/builder.php?funnel=' + encodeURIComponent(funnelId);
+    };
+
+    /** Same surface, opened straight at its Analytics section. */
+    Lumera.openFunnelAnalytics = function (funnelId) {
+        window.location.href = '/admin/builder.php?funnel=' + encodeURIComponent(funnelId) + '#analytics';
     };
 
     bindChrome();

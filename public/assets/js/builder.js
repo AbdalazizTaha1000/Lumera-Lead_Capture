@@ -104,7 +104,8 @@
         openStepId: null,
         stepTab: {},
         editLang: 'en',
-        analytics: null
+        analytics: null,
+        range: { id: '30', days: 30, from: null, to: null }
     };
 
     var TYPES = JSON.parse(($('#step-types') || {}).textContent || '{}');
@@ -1746,8 +1747,57 @@
     }
 
     /* -------------------------------------------------------- analytics -- */
+    /**
+     * Analytics reads from the event engine, never from the leads table alone.
+     *
+     * Two rules run through everything below. A metric with no measurement is
+     * drawn as "No data yet" or an em dash, never as a zero — a zero is a
+     * measurement. And days that predate tracking are marked lead-only, because
+     * their lead count is real while their traffic was simply never recorded.
+     */
+    var RANGES = [
+        { id: 'today', label: 'Today', days: 1 },
+        { id: '7', label: '7 days', days: 7 },
+        { id: '30', label: '30 days', days: 30 },
+        { id: '90', label: '90 days', days: 90 }
+    ];
+
+    function fmtNumber(n) {
+        if (n === null || n === undefined) { return '—'; }
+        return Number(n).toLocaleString();
+    }
+
+    function fmtRate(v) {
+        if (v === null || v === undefined) { return '—'; }
+        return Number(v).toFixed(1) + '%';
+    }
+
+    function fmtDuration(seconds) {
+        if (seconds === null || seconds === undefined) { return '—'; }
+        var s = Math.max(0, Math.round(seconds));
+        if (s < 60) { return s + 's'; }
+        var m = Math.floor(s / 60);
+        if (m < 60) { return m + 'm ' + (s % 60) + 's'; }
+        return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+    }
+
+    function noData(text) {
+        var n = el('p', 'nodata', text || 'No data yet');
+        return n;
+    }
+
+    function analyticsQuery() {
+        var q = '/api/admin/analytics.php?funnel_id=' + state.funnelId + '&compare=1';
+
+        if (state.range.from && state.range.to) {
+            return q + '&date_from=' + state.range.from + '&date_to=' + state.range.to;
+        }
+        return q + '&days=' + state.range.days;
+    }
+
     function renderAnalytics(host) {
         host.appendChild(sectionHead('Analytics', 'How this funnel is performing.'));
+        host.appendChild(rangeBar());
 
         if (!state.analytics) {
             var boot = el('div', 'boot');
@@ -1755,103 +1805,341 @@
             boot.appendChild(el('span', 'boot__spinner'));
             host.appendChild(boot);
 
-            api('/api/admin/analytics.php?funnel_id=' + state.funnelId + '&days=30')
+            api(analyticsQuery())
                 .then(function (d) { state.analytics = d; render(); })
-                .catch(function (e) { toast(e.message, 'error'); });
+                .catch(function (e) { if (e.message !== 'auth') { toast(e.message, 'error'); } });
             return;
         }
 
         var a = state.analytics;
+        var s = a.summary;
 
-        var stats = el('div', 'stat-row');
+        if (!a.meta.analytics_enabled) {
+            host.appendChild(note('Visitor tracking is switched off for this installation. '
+                + 'Figures already recorded are still shown.', 'warn', I.warn));
+        }
+
+        var kpis = el('div', 'kpi-row');
         [
-            ['Leads', a.totals.leads, 'all time'],
-            ['Today', a.totals.today, ''],
-            ['This week', a.totals.week, 'last 7 days'],
-            ['Average score', a.totals.avg_score, 'per lead']
-        ].forEach(function (s) {
-            var box = el('div', 'stat');
-            box.appendChild(el('div', 'stat__label', s[0]));
-            box.appendChild(el('div', 'stat__value', s[1]));
-            if (s[2]) { box.appendChild(el('div', 'stat__meta', s[2])); }
-            stats.appendChild(box);
+            ['Visitors', fmtNumber(s.unique_visitors), 'unique people'],
+            ['Sessions', fmtNumber(s.sessions), fmtNumber(s.views) + ' views'],
+            ['Leads', fmtNumber(s.leads), s.attributed_leads + ' matched to a visit'],
+            ['Conversion', fmtRate(s.conversion_rate), 'matched leads per visit'],
+            ['Completion', fmtRate(s.completion_rate), 'of engaged sessions'],
+            ['Avg. time', fmtDuration(s.avg_completion_seconds), 'to complete']
+        ].forEach(function (k) {
+            var box = el('div', 'kpi');
+            box.appendChild(el('div', 'kpi__label', k[0]));
+            box.appendChild(el('div', 'kpi__value', k[1]));
+            box.appendChild(el('div', 'kpi__meta', k[2]));
+            kpis.appendChild(box);
         });
-        host.appendChild(stats);
+        host.appendChild(kpis);
 
-        // trend — a flat row of zeroes is not a chart, so say so instead
-        if (a.totals.leads === 0) {
-            var none = el('div', 'empty');
-            var ni = icon(I.chart, 26);
-            ni.classList.add('empty__icon');
-            none.appendChild(ni);
-            none.appendChild(el('p', 'empty__title', 'No leads yet'));
-            none.appendChild(el('p', 'empty__text',
-                'Once your funnel starts collecting, the trend and breakdowns appear here.'));
-            host.appendChild(none);
+        host.appendChild(trendCard(a));
+        host.appendChild(dropOffCard(a));
+
+        var g1 = el('div', 'grid-2');
+        g1.appendChild(barCard('Traffic sources', a.sources));
+        g1.appendChild(barCard('Campaigns', a.campaigns));
+        host.appendChild(g1);
+
+        var g2 = el('div', 'grid-2');
+        g2.appendChild(barCard('Devices', a.devices));
+        g2.appendChild(barCard('Countries', a.countries));
+        host.appendChild(g2);
+
+        var g3 = el('div', 'grid-2');
+        g3.appendChild(barCard('Browsers', a.browsers));
+        g3.appendChild(barCard('Operating systems', a.os));
+        host.appendChild(g3);
+
+        var g4 = el('div', 'grid-2');
+        g4.appendChild(barCard('Referrers', a.referrers));
+        g4.appendChild(barCard('Cities', a.cities));
+        host.appendChild(g4);
+
+        if ((a.comparison || []).length > 1) {
+            host.appendChild(comparisonCard(a.comparison));
+        }
+
+        if (a.meta.tracking_started_on) {
+            host.appendChild(note('Visitor tracking started on ' + a.meta.tracking_started_on
+                + '. Earlier days show their real lead count only — traffic was not measured then, '
+                + 'so it is left blank rather than shown as zero.', null, I.info));
         } else {
-            var max = Math.max.apply(null, a.trend.map(function (p) { return p.leads; }).concat([1]));
-            var spark = el('div', 'spark');
-            a.trend.forEach(function (p) {
-                var b = el('div', 'spark__bar');
-                b.style.height = Math.max(2, Math.round((p.leads / max) * 100)) + '%';
-                b.title = p.date + ' · ' + p.leads + ' lead' + (p.leads === 1 ? '' : 's');
-                spark.appendChild(b);
-            });
-            host.appendChild(card('Last ' + a.range_days + ' days', a.totals.month + ' leads this month', spark));
+            host.appendChild(note('No visits have been recorded yet. Lead figures are real; '
+                + 'traffic, conversion and drop-off appear once the funnel receives its first visitor.',
+                null, I.info));
         }
 
-        function barCard(title, rows, sub) {
-            var wrap = el('div', 'bars');
-            if (!rows.length) {
-                wrap.appendChild(el('p', 'field__hint', 'Nothing recorded yet.'));
-            }
-            var top = Math.max.apply(null, rows.map(function (r) { return r.total; }).concat([1]));
-            rows.forEach(function (r) {
-                var item = el('div');
-                var head = el('div', 'bar__top');
-                head.appendChild(el('span', 'bar__label', r.label));
-                head.appendChild(el('span', 'bar__value', r.total));
-                item.appendChild(head);
-                var track = el('div', 'bar__track');
-                var fill = el('div', 'bar__fill');
-                fill.style.width = Math.round((r.total / top) * 100) + '%';
-                track.appendChild(fill);
-                item.appendChild(track);
-                wrap.appendChild(item);
-            });
-            return card(title, sub, wrap);
+        var footnote = 'Per-step figures come from the event timeline, which is kept for '
+            + a.meta.event_retention_days + ' days. Visitors, sessions, leads and completions stay exact for any range.';
+
+        if (s.leads > s.attributed_leads) {
+            footnote += ' ' + (s.leads - s.attributed_leads) + ' lead'
+                + (s.leads - s.attributed_leads === 1 ? '' : 's')
+                + ' in this range could not be matched to a tracked visit, so the '
+                + 'conversion rate counts only the ' + s.attributed_leads + ' that could.';
         }
+
+        host.appendChild(el('p', 'field__hint', footnote));
+    }
+
+    function rangeBar() {
+        var bar = el('div', 'range-bar');
+        var group = el('div', 'subtabs');
+
+        RANGES.forEach(function (r) {
+            var b = el('button', 'subtab' + (state.range.id === r.id ? ' is-on' : ''), r.label);
+            b.type = 'button';
+            b.addEventListener('click', function () {
+                state.range = { id: r.id, days: r.days, from: null, to: null };
+                state.analytics = null;
+                render();
+            });
+            group.appendChild(b);
+        });
+
+        var custom = el('button', 'subtab' + (state.range.id === 'custom' ? ' is-on' : ''), 'Custom');
+        custom.type = 'button';
+        custom.addEventListener('click', openCustomRange);
+        group.appendChild(custom);
+
+        bar.appendChild(group);
+
+        var spacer = el('div');
+        spacer.style.flex = '1';
+        bar.appendChild(spacer);
+
+        if (state.analytics) {
+            bar.appendChild(el('span', 'range-bar__dates',
+                state.analytics.range.from + ' → ' + state.analytics.range.to));
+        }
+
+        bar.appendChild(button('Refresh', 'btn--ghost btn--sm', function () {
+            state.analytics = null;
+            render();
+        }));
+
+        return bar;
+    }
+
+    function openCustomRange() {
+        var today = new Date().toISOString().slice(0, 10);
+        var from = input(state.range.from || today, { type: 'date' });
+        var to = input(state.range.to || today, { type: 'date' });
 
         var grid = el('div', 'grid-2');
-        grid.appendChild(barCard('Traffic sources', a.sources));
-        grid.appendChild(barCard('Devices', a.devices));
-        host.appendChild(grid);
+        grid.appendChild(field('From', from));
+        grid.appendChild(field('To', to));
 
-        var grid2 = el('div', 'grid-2');
-        grid2.appendChild(barCard('Campaigns', a.campaigns));
-        grid2.appendChild(barCard('Languages', a.languages));
-        host.appendChild(grid2);
+        var wrap = el('div');
+        wrap.appendChild(grid);
 
-        var cov = el('div', 'bars');
-        a.step_coverage.forEach(function (s) {
+        modal.open({
+            title: 'Custom date range',
+            sub: 'Both dates are included.',
+            body: wrap,
+            actions: [
+                button('Cancel', 'btn--ghost', function () { modal.close(); }),
+                button('Apply', 'btn--publish', function () {
+                    if (!from.value || !to.value) { toast('Choose both dates.', 'error'); return; }
+                    state.range = { id: 'custom', days: 0, from: from.value, to: to.value };
+                    state.analytics = null;
+                    modal.close();
+                    render();
+                })
+            ]
+        });
+    }
+
+    function trendCard(a) {
+        var series = a.trend || [];
+        var hasTraffic = series.some(function (p) { return !p.lead_only && (p.sessions > 0 || p.views > 0); });
+        var hasLeads = series.some(function (p) { return p.leads > 0; });
+
+        if (!hasTraffic && !hasLeads) {
+            return card('Performance', null, noData('No activity in this date range.'));
+        }
+
+        var wrap = el('div');
+
+        var legend = el('div', 'legend');
+        [['views', 'Views'], ['sessions', 'Sessions'], ['leads', 'Leads']].forEach(function (m) {
+            var item = el('span', 'legend__item');
+            item.appendChild(el('span', 'legend__dot legend__dot--' + m[0]));
+            item.appendChild(el('span', null, m[1]));
+            legend.appendChild(item);
+        });
+        wrap.appendChild(legend);
+
+        var max = Math.max.apply(null, series.map(function (p) {
+            return Math.max(p.views, p.sessions, p.leads);
+        }).concat([1]));
+
+        var chart = el('div', 'chart');
+
+        series.forEach(function (p) {
+            var col = el('div', 'chart__col');
+            col.title = p.date + (p.lead_only
+                ? ' · ' + p.leads + ' leads · traffic not tracked yet'
+                : ' · ' + p.views + ' views · ' + p.sessions + ' sessions · ' + p.leads + ' leads');
+
+            var stack = el('div', 'chart__stack');
+
+            if (p.lead_only) {
+                // Traffic was never measured on this day, so only the lead bar
+                // is drawn — hatched, so the gap reads as absence not as zero.
+                var lo = el('div', 'chart__bar chart__bar--leadonly');
+                lo.style.height = Math.max(p.leads > 0 ? 3 : 0, Math.round((p.leads / max) * 100)) + '%';
+                stack.appendChild(lo);
+            } else {
+                [['views', p.views], ['sessions', p.sessions], ['leads', p.leads]].forEach(function (m) {
+                    var b = el('div', 'chart__bar chart__bar--' + m[0]);
+                    b.style.height = Math.max(m[1] > 0 ? 3 : 0, Math.round((m[1] / max) * 100)) + '%';
+                    stack.appendChild(b);
+                });
+            }
+
+            col.appendChild(stack);
+            chart.appendChild(col);
+        });
+
+        wrap.appendChild(chart);
+
+        var axis = el('div', 'chart__axis');
+        axis.appendChild(el('span', null, series.length ? series[0].date : ''));
+        axis.appendChild(el('span', null, series.length ? series[series.length - 1].date : ''));
+        wrap.appendChild(axis);
+
+        return card('Performance', a.range.days + ' day' + (a.range.days === 1 ? '' : 's'), wrap);
+    }
+
+    function dropOffCard(a) {
+        var steps = a.steps || [];
+
+        if (steps.length === 0) {
+            return card('Funnel drop-off', null, noData('This funnel has no active steps.'));
+        }
+
+        if (!steps.some(function (s) { return s.views > 0; })) {
+            return card('Funnel drop-off', 'Where visitors leave',
+                noData('No step activity recorded in this date range.'));
+        }
+
+        var top = Math.max.apply(null, steps.map(function (s) { return s.views; }).concat([1]));
+        var wrap = el('div', 'steps-chart');
+
+        steps.forEach(function (s) {
+            var row = el('div', 'stepbar');
+
+            var head = el('div', 'stepbar__head');
+            var name = el('div', 'stepbar__name');
+            name.appendChild(el('span', 'stepbar__pos', s.position));
+            name.appendChild(el('span', null, s.title));
+            head.appendChild(name);
+
+            var stats = el('div', 'stepbar__stats');
+            stats.appendChild(el('span', null, fmtNumber(s.views) + ' views'));
+            stats.appendChild(el('span', null, fmtNumber(s.starts) + ' started'));
+            stats.appendChild(el('span', null, fmtNumber(s.completions) + ' completed'));
+            if (s.avg_seconds !== null) { stats.appendChild(el('span', null, fmtDuration(s.avg_seconds))); }
+            head.appendChild(stats);
+            row.appendChild(head);
+
+            var track = el('div', 'stepbar__track');
+            var done = el('div', 'stepbar__fill');
+            done.style.width = Math.round((s.completions / top) * 100) + '%';
+            track.appendChild(done);
+
+            var lost = el('div', 'stepbar__drop');
+            lost.style.width = Math.round((s.dropped / top) * 100) + '%';
+            track.appendChild(lost);
+            row.appendChild(track);
+
+            var foot = el('div', 'stepbar__foot');
+            var left = el('span', null, s.type_label);
+            if (s.errors > 0) { left.textContent += ' · ' + s.errors + ' validation errors'; }
+            if (s.backs > 0) { left.textContent += ' · ' + s.backs + ' went back'; }
+            foot.appendChild(left);
+
+            var drop = el('span', 'stepbar__droprate', s.drop_off_rate === null
+                ? 'No data yet'
+                : fmtRate(s.drop_off_rate) + ' drop-off · ' + fmtNumber(s.dropped) + ' lost');
+            if (s.drop_off_rate !== null && s.drop_off_rate >= 40) { drop.classList.add('is-high'); }
+            foot.appendChild(drop);
+            row.appendChild(foot);
+
+            wrap.appendChild(row);
+        });
+
+        return card('Funnel drop-off', 'Where visitors leave', wrap);
+    }
+
+    function barCard(title, rows) {
+        rows = rows || [];
+
+        if (rows.length === 0) { return card(title, null, noData()); }
+
+        var top = Math.max.apply(null, rows.map(function (r) { return r.total; }).concat([1]));
+        var wrap = el('div', 'bars');
+
+        rows.forEach(function (r) {
             var item = el('div');
             var head = el('div', 'bar__top');
-            head.appendChild(el('span', 'bar__label', s.title));
-            head.appendChild(el('span', 'bar__value', s.answered + ' · ' + s.percent + '%'));
+            head.appendChild(el('span', 'bar__label', r.label));
+            head.appendChild(el('span', 'bar__value',
+                fmtNumber(r.total) + (r.leads ? ' · ' + r.leads + ' leads' : '')));
             item.appendChild(head);
+
             var track = el('div', 'bar__track');
             var fill = el('div', 'bar__fill');
-            fill.style.width = s.percent + '%';
+            fill.style.width = Math.round((r.total / top) * 100) + '%';
             track.appendChild(fill);
             item.appendChild(track);
-            cov.appendChild(item);
+            wrap.appendChild(item);
         });
-        host.appendChild(card('Answers per step', 'Share of completed leads that answered each step.', cov));
 
-        host.appendChild(note(
-            'Visitor counts, conversion rate, completion rate and per-step drop-off are not shown because this platform '
-            + 'records submitted leads, not page views. Those figures need view tracking, which is not collected.',
-            null, I.info));
+        return card(title, null, wrap);
+    }
+
+    function comparisonCard(rows) {
+        var wrap = el('div', 'compare');
+
+        rows.forEach(function (r) {
+            var row = el('div', 'compare__row' + (r.funnel_id === state.funnelId ? ' is-current' : ''));
+
+            var name = el('div', 'compare__name');
+            name.appendChild(el('div', null, r.name));
+            name.appendChild(el('div', 'compare__slug', '/' + r.slug));
+            row.appendChild(name);
+
+            [
+                [fmtNumber(r.unique_visitors), 'visitors'],
+                [fmtNumber(r.sessions), 'sessions'],
+                [fmtNumber(r.leads), 'leads'],
+                [fmtRate(r.conversion_rate), 'conversion']
+            ].forEach(function (m) {
+                var cell = el('div', 'compare__metric');
+                cell.appendChild(el('div', 'compare__value', m[0]));
+                cell.appendChild(el('div', 'compare__label', m[1]));
+                row.appendChild(cell);
+            });
+
+            if (r.funnel_id === state.funnelId) {
+                row.appendChild(el('span', 'compare__here', 'This funnel'));
+            } else {
+                row.appendChild(button('Open', 'btn--ghost btn--sm', function () {
+                    window.location.href = '/admin/builder.php?funnel='
+                        + encodeURIComponent(r.funnel_id) + '#analytics';
+                }));
+            }
+
+            wrap.appendChild(row);
+        });
+
+        return card('All funnels', 'Same date range', wrap);
     }
 
     /* ============================================================ share === */

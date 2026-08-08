@@ -32,6 +32,7 @@ use Lumera\Core\Config;
 use Lumera\Core\Database;
 use Lumera\Repositories\AdminUserRepository;
 use Lumera\Repositories\FunnelRepository;
+use Lumera\Services\AnalyticsService;
 use Lumera\Services\PublishService;
 
 App::boot($basePath);
@@ -365,6 +366,34 @@ try {
             break;
 
         // ------------------------------------------------------------------
+        case 'analytics:rollup':
+            if (!AnalyticsService::enabled()) {
+                out('Analytics is disabled (ANALYTICS_ENABLED=false). Nothing to do.');
+                break;
+            }
+
+            $days = isset($args[0]) ? (int) $args[0] : 7;
+            $result = (new AnalyticsService())->rollup($days);
+
+            out("Closed {$result['abandoned']} abandoned session(s).");
+            out("Rebuilt {$result['funnels']} funnel-day rollup(s) across {$result['days']} day(s).");
+            break;
+
+        // ------------------------------------------------------------------
+        case 'analytics:prune':
+            if (!AnalyticsService::enabled()) {
+                out('Analytics is disabled (ANALYTICS_ENABLED=false). Nothing to do.');
+                break;
+            }
+
+            $retention = AnalyticsService::retentionDays();
+            $deleted = (new AnalyticsService())->prune();
+
+            out("Deleted {$deleted} raw analytics event(s) older than {$retention} days.");
+            out('Sessions, rollups and leads were not touched.');
+            break;
+
+        // ------------------------------------------------------------------
         case 'prune':
             Database::execute('DELETE FROM `rate_limit_entries` WHERE `expires_at` < NOW()');
             $attempts = Database::execute('DELETE FROM `login_attempts` WHERE `attempted_at` < (NOW() - INTERVAL 30 DAY)');
@@ -385,6 +414,8 @@ try {
             out('  funnel:publish [slug]              Publish the current draft');
             out('  funnel:status [slug]               Show draft / published state');
             out('  prune                              Clean expired rate-limit and login rows');
+            out('  analytics:rollup [days]            Close stale sessions and rebuild daily rollups');
+            out('  analytics:prune                    Delete raw analytics events past retention');
             break;
     }
 } catch (Throwable $e) {
